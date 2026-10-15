@@ -1,0 +1,19 @@
+{
+  "name": "tu-berlin-auto-login",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-isolation=none",
+    "lint": "web-ext lint --source-dir extension --warnings-as-errors",
+    "build": "node scripts/build.mjs",
+    "start": "web-ext run --source-dir extension --firefox /usr/bin/firefox"
+  },
+  "overrides": {
+    "shell-quote": "^1.12.0"
+  },
+  "devDependencies": {
+    "jsdom": "^30.1.2",
+    "web-ext": "^10.7.0"
+  }
+}

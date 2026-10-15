@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "TU Berlin Auto Login",
+  "version": "1.0.0",
+  "description": "Automatically resume TU Berlin SSO on ISIS and Moses, with optional local password and TOTP autofill.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://isis.tu-berlin.de/*",
+    "https://moseskonto.tu-berlin.de/*",
+    "https://shibboleth.tubit.tu-berlin.de/*"
+  ],
+  "background": {"scripts": ["background.js"], "type": "module"},
+  "content_scripts": [{
+    "matches": [
+      "https://isis.tu-berlin.de/*",
+      "https://moseskonto.tu-berlin.de/*",
+      "https://shibboleth.tubit.tu-berlin.de/idp/*"
+    ],
+    "js": ["adapters.js", "content.js"],
+    "run_at": "document_idle"
+  }],
+  "options_ui": {"page": "options/options.html", "open_in_tab": true},
+  "action": {
+    "default_title": "TU Berlin Auto Login",
+    "default_popup": "popup/popup.html",
+    "default_icon": "icons/tu.svg"
+  },
+  "icons": {"48": "icons/tu.svg", "96": "icons/tu.svg"},
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'none'; base-uri 'none'; form-action 'none'"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "tu-auto-login@local.nick",
+      "strict_min_version": "142.0",
+      "data_collection_permissions": {"required": ["authenticationInfo"]}
+    }
+  }
+}

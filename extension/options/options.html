@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TU Auto Login · Settings</title>
+  <link rel="icon" href="../icons/tu.svg">
+  <link rel="stylesheet" href="options.css">
+  <script type="module" src="options.js"></script>
+</head>
+<body>
+  <main>
+    <header><img src="../icons/tu.svg" width="52" height="52" alt=""><div><p class="eyebrow">A LITTLE LESS LOGIN</p><h1>TU Berlin Auto Login</h1></div></header>
+    <p class="intro">Go straight to your courses. Automatically follow TU single sign-on and sign back in when your session expires.</p>
+    <form id="settings">
+      <section>
+        <h2>Make yourself at home</h2>
+        <label class="check"><input type="checkbox" id="enabled"> Enable automatic login</label>
+        <p class="hint">Automatically open TU sign-in when you visit these services:</p>
+        <div class="services"><label class="check"><input type="checkbox" id="isis"> ISIS</label><label class="check"><input type="checkbox" id="moses"> Moses</label></div>
+        <p class="hint">The central TU login is also completed when other services send you there. Use the toolbar to pause all automation.</p>
+      </section>
+      <section>
+        <h2>Your TUB account <span>Optional</span></h2>
+        <p class="hint">Leave both fields empty to use an existing SSO session and enter credentials yourself when needed.</p>
+        <label for="username">TUB username</label>
+        <input id="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="4096" placeholder="Your account name">
+        <label for="password">Password</label>
+        <div class="secret"><input id="password" type="password" autocomplete="new-password" maxlength="4096"><button type="button" data-reveal="password" aria-label="Show password" aria-pressed="false">Show</button></div>
+      </section>
+      <section>
+        <h2>One-time passwords <span>Optional</span></h2>
+        <p class="hint">For unattended two-factor login, paste the <strong>setup secret</strong> from your authenticator setup, or the full <code>otpauth://totp/…</code> URI encoded in its QR code. A current six-digit code cannot generate future codes. TAN lists, push approvals and hardware keys still require you.</p>
+        <label for="totp">TOTP setup secret or URI</label>
+        <div class="secret"><input id="totp" type="password" autocomplete="off" spellcheck="false" maxlength="4096" placeholder="Base32 secret or otpauth://totp/…"><button type="button" data-reveal="totp" aria-label="Show TOTP secret" aria-pressed="false">Show</button></div>
+        <div class="token-test"><button type="button" id="test-totp" class="secondary">Preview current OTP</button><output id="totp-preview" aria-live="polite"></output></div>
+      </section>
+      <aside class="privacy"><strong>Keep this Firefox profile private.</strong> Your password and TOTP secret are saved locally, unencrypted, so login can work after restarting Firefox. They are never synced by this extension. Saving both factors together lets anyone with access to this profile sign in as you. Credentials are filled only on the exact TU Shibboleth HTTPS host. No analytics or third-party servers.</aside>
+      <div class="actions"><button type="submit" id="save">Save settings</button><button type="button" id="forget" class="danger">Delete saved settings &amp; credentials</button></div>
+      <p id="status" role="status" aria-live="polite"></p>
+    </form>
+    <footer>Independent extension, not affiliated with TU Berlin. TU sets session lifetimes; this extension signs you back in while you browse. Errors pause automation. Logging out pauses it until you choose Resume in the toolbar.</footer>
+  </main>
+</body>
+</html>

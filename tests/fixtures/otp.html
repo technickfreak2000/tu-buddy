@@ -1,0 +1,7 @@
+<!doctype html><title>Web Login Service</title>
+<!-- Representative fixture: the authenticated TU OTP page has not been inspected. -->
+<form action="/idp/profile/SAML2/Redirect/SSO?execution=e1s3" method="post">
+  <label for="otp">TOTP token from your authenticator</label>
+  <input id="otp" name="j_tokenNumber" autocomplete="one-time-code" inputmode="numeric">
+  <button name="_eventId_proceed" type="submit">Continue</button>
+</form>
