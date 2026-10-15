@@ -24,7 +24,7 @@ When an ISIS/Moses login control or supported TU sign-in form appears and no use
 
 On ISIS VideoService viewer pages, TU Buddy adds a **Download** button beside the player settings when ISIS has no native video download control. It uses the direct video file already exposed by the player, with the lecture title as the suggested filename. It updates when the viewer switches videos; multiple players get distinct filenames. Existing native download controls are kept.
 
-Downloads start only when you click and use Firefox's normal download handling and current ISIS session. The helper works for direct MP4, M4V, WebM, OGV and MOV files served by ISIS VideoService or Moodle's file endpoint. It does not assemble HLS/DASH streams or handle DRM. There are no additional permissions or video URL storage. This viewer feature remains available when automatic login is paused.
+Downloads start only when you click. The button calls Firefox's downloads API and keeps the viewer open, even when the site would otherwise open media links in another tab. The suggested filename follows the lecture title, and the download uses the viewer's ISIS session, including Firefox containers and private windows. The helper works for direct MP4, M4V, WebM, OGV and MOV files served by ISIS VideoService or Moodle's file endpoint. It does not assemble HLS/DASH streams or handle DRM. The `downloads` permission starts actual file downloads. The `cookies` permission is used to select the viewer tab's cookie store for container sessions; cookie values are not read or modified. Video URLs are not stored by the extension. This viewer feature remains available when automatic login is paused.
 
 ## TUB-Guest and a second Wi-Fi adapter
 
@@ -70,7 +70,7 @@ Unattended login after restarting Firefox requires recoverable credentials. **Th
 
 - No analytics, remote code, third-party requests, telemetry, external backend or `storage.sync`.
 - Credentials are filled only in recognized POST login forms on **`https://shibboleth.tubit.tu-berlin.de/idp/profile/...`** and the pinned **`https://radius-01.tu-berlin.de:8443/portal/LoginSubmit.action`**, with checked form and submit-button destinations. The TOTP seed stays in the background context; only a generated code reaches a Shibboleth page.
-- Content scripts run in the top frame on the exact ISIS, Moses, TUport, Shibboleth and radius-01 hosts. The video-download helper runs only on ISIS VideoService pages. No wildcard access to other TU subdomains, cookie access, browsing history or web request interception.
+- Content scripts run in the top frame on the exact ISIS, Moses, TUport, Shibboleth and radius-01 hosts. The video-download helper runs only on ISIS VideoService pages. No wildcard access to other TU subdomains, browsing history access or web request interception. Cookie permission is used only for the download session context.
 - `webNavigation` observes top-level navigation starts so TUport's immediate server redirect retains its service setting; only a service name per tab is stored, with no navigation URLs or history retained. `captivePortal` checks Firefox's network-login state, `alarms` schedules guest-network checks, and `nativeMessaging` communicates with the optional read-only Linux helper. The helper can only perform fixed portal discovery, never arbitrary commands or login submissions.
 - Settings and credential-management messages require an exact extension-owned settings, setup or popup URL. Websites cannot invoke them. Setup return requests are bound to their original and setup tab IDs; they cannot supply an arbitrary return URL. Setup pages cannot be embedded in website frames.
 - Attempt metadata is kept in `storage.session`; credentials, preferences and pause reason are kept locally. No credentials are written to logs or shipped in the package.
@@ -88,7 +88,7 @@ npm run build
 npm start
 ```
 
-`npm start` launches an isolated temporary Firefox profile; change the Firefox binary argument in `package.json` if it is installed elsewhere. The build writes `dist/tu-berlin-auto-login-1.4.0.zip` and includes only `extension/`. Install the optional native helper separately from the repository. Runtime JavaScript has no dependencies, no bundler and no network-loaded libraries.
+`npm start` launches an isolated temporary Firefox profile; change the Firefox binary argument in `package.json` if it is installed elsewhere. The build writes `dist/tu-berlin-auto-login-1.4.1.zip` and includes only `extension/`. Install the optional native helper separately from the repository. Runtime JavaScript has no dependencies, no bundler and no network-loaded libraries.
 
 Tests cover RFC 6238 TOTP vectors, URI validation, exact-origin and message authorization, retry limits, pause persistence, login-button selection, named submitters, dynamic Moses navigation, OTP waits, destination changes, guest credential/AGB handling, portal discovery, native message framing, changing adapter names and helper installation/removal. Native tests use Python's standard library.
 
@@ -98,7 +98,7 @@ Enable **TUport** in settings and visit [tuport.sap.tu-berlin.de](https://tuport
 
 ### Verification limits
 
-The ISIS video fixture is reduced from the viewer markup supplied by the user. A Firefox check downloaded a tiny local test file with the expected lecture filename and session cookie after changing the player source. Native download detection and Vue rerenders are covered by DOM tests; no lecture media was downloaded from TU during verification.
+The ISIS video fixture is reduced from the viewer markup supplied by the user. Firefox checks downloaded tiny local test files through the downloads API in both normal and container sessions, with the expected lecture filenames and session cookies. The viewer stayed open and no media tab appeared, including on a fixture that intercepts link clicks to open new tabs. Native download detection and Vue rerenders are covered by DOM tests; no lecture media was downloaded from TU during verification.
 
 TUport's public redirect and account form were inspected on **2026-10-15** and use the same Shibboleth form as ISIS. The public ISIS login form, its redirect to Shibboleth, the TU username/password form and Moses's current JavaScript login control were inspected on **2026-10-15**. TUB-Guest's actual login form and Cisco JavaScript were also inspected through `wlan3`; a live device-specific portal redirect was obtained. Reduced fixtures preserve relevant controls without session tokens. **No real TUB credentials have been used.** TU's app-code prompt and the `j_totp` input / named Continue button were supplied from the user's live page on **2026-10-15** and are covered by a reduced fixture. Full authenticated OTP and AGB documents have not been inspected; those fixtures use representative forms, with guest AGB control names verified in the portal's JavaScript. If TU changes markup, the adapter may need updating. Other TU services work only when their flow reaches the supported Shibboleth form. TU outages, expired SAML flows and mandatory interaction can still interrupt login.
 

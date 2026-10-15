@@ -8,10 +8,14 @@ const script = await readFile(new URL("../extension/video-download.js", import.m
 const fixture = await readFile(new URL("fixtures/video-view.html", import.meta.url), "utf8");
 const url = "https://isis.tu-berlin.de/mod/videoservice/view.php/cm/1/video/2/view";
 const selector = '[data-tu-buddy-video-download]';
-function setup(html = fixture, pageUrl = url) {
+function setup(html = fixture, pageUrl = url, responder = async () => ({ok: true, downloadId: 1})) {
   const dom = new JSDOM(html, {url: pageUrl, runScripts: "outside-only"});
+  const messages = [];
+  dom.window.browser = {runtime: {sendMessage: async message => {
+    messages.push(message); return responder(message);
+  }}};
   dom.window.eval(script);
-  return {dom, doc: dom.window.document, link: () => dom.window.document.querySelector(selector)};
+  return {dom, doc: dom.window.document, messages, link: () => dom.window.document.querySelector(selector)};
 }
 async function until(check) {
   for (let i = 0; i < 30; i++) { if (check()) return; await delay(20); }
@@ -20,8 +24,10 @@ async function until(check) {
 test("the supplied viewer gets a titled download beside its player settings", () => {
   const p = setup();
   try {
-    assert.equal(p.link().href, "https://isis.tu-berlin.de/mod/videoservice/file.php/fixture.mp4");
-    assert.equal(p.link().download, "6. Leistung.mp4");
+    assert.equal(p.link().tagName, "BUTTON");
+    assert.equal(p.link().type, "button");
+    assert.equal(p.link().hasAttribute("href"), false);
+    assert.equal(p.link().title, "Download 6. Leistung.mp4");
     assert.equal(p.link().textContent, "Download");
     assert.equal(p.link().closest(".video-info") !== null, true);
     assert.equal(p.doc.querySelectorAll(selector).length, 1);
@@ -45,8 +51,7 @@ test("Vue rerenders and source changes update one download button", async () => 
     await until(() => p.link());
     p.doc.querySelector("video").src = "/mod/videoservice/file.php/second.webm";
     p.doc.querySelector("h3").textContent = '7. Speicher: "Teil/2"';
-    await until(() => p.link().download === "7. Speicher- -Teil-2-.webm");
-    assert.match(p.link().href, /second\.webm$/);
+    await until(() => p.link().title === "Download 7. Speicher- -Teil-2-.webm");
     p.doc.querySelector(".video-info").replaceChildren(p.doc.createElement("span"));
     await until(() => p.link());
     assert.equal(p.doc.querySelectorAll(selector).length, 1);
@@ -67,7 +72,7 @@ test("source elements work and multiple players get distinct download names", ()
   try {
     const links = [...p.doc.querySelectorAll(selector)];
     assert.equal(links.length, 2);
-    assert.deepEqual(links.map(link => link.download), ["6. Leistung - 1.mp4", "6. Leistung - 2.mp4"]);
+    assert.deepEqual(links.map(link => link.title), ["Download 6. Leistung - 1.mp4", "Download 6. Leistung - 2.mp4"]);
   } finally { p.dom.window.close(); }
 });
 test("unrelated pages, foreign URLs and non-file streams receive no fallback", () => {
@@ -85,19 +90,37 @@ test("unrelated pages, foreign URLs and non-file streams receive no fallback", (
     finally { p.dom.window.close(); }
   }
 });
-test("clicking immediately after a source change uses the latest media URL", () => {
+test("clicking immediately after a source change requests a download and prevents page navigation", async () => {
   const p = setup();
   try {
     const link = p.link();
-    Object.defineProperty(p.doc.querySelector("video"), "currentSrc", {value: link.href});
+    Object.defineProperty(p.doc.querySelector("video"), "currentSrc", {value: "https://isis.tu-berlin.de/mod/videoservice/file.php/fixture.mp4"});
     p.doc.querySelector("video").src = "/mod/videoservice/file.php/new.mp4";
-    link.addEventListener("click", event => event.preventDefault());
-    link.click();
-    assert.match(link.href, /new\.mp4$/);
+    const click = new p.dom.window.MouseEvent("click", {bubbles: true, cancelable: true});
+    link.dispatchEvent(click);
+    await until(() => !link.disabled);
+    assert.equal(click.defaultPrevented, true);
+    assert.match(p.messages[0].url, /new\.mp4$/);
+    assert.equal(p.messages[0].type, "download-video");
+    assert.equal(p.messages[0].filename, "6. Leistung.mp4");
+    assert.equal(p.dom.window.location.href, url);
     p.doc.querySelector("video").src = "https://attacker.test/lecture.mp4";
     const event = new p.dom.window.MouseEvent("click", {bubbles: true, cancelable: true});
     link.dispatchEvent(event);
     assert.equal(event.defaultPrevented, true);
     assert.equal(p.link(), null);
+    assert.equal(p.messages.length, 1);
+  } finally { p.dom.window.close(); }
+});
+test("one click stays disabled until Firefox starts the download and shows API errors", async () => {
+  let finish;
+  const p = setup(fixture, url, () => new Promise(resolve => { finish = resolve; }));
+  try {
+    p.link().click(); p.link().click();
+    assert.equal(p.link().disabled, true);
+    assert.equal(p.messages.length, 1);
+    finish({ok: false, reason: "Download permission is missing."});
+    await until(() => !p.link().disabled);
+    assert.match(p.doc.querySelector('[role="status"]').textContent, /permission is missing/);
   } finally { p.dom.window.close(); }
 });

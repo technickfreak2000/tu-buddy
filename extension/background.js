@@ -2,6 +2,7 @@ import {DEFAULT_SETTINGS, classifyUrl, trustedSender, safeFormAction, safeGuestA
 import {parseTotp, generateTotp} from "./lib/totp.js";
 import {createGuestDiscovery, GUEST_ALARM} from "./lib/guest-discovery.js";
 import {createLoginSetup} from "./lib/login-setup.js";
+import {downloadVideo} from "./lib/video-download.js";
 
 const SETTINGS_KEY = "settings";
 const STATE_KEY = "runtime";
@@ -213,6 +214,9 @@ async function handle(message, sender) {
 }
 
 browser.runtime.onMessage.addListener((message, sender) => {
+  // A file chooser must not block the login queue, and manual downloads stay
+  // available while automatic login is paused.
+  if (message?.type === "download-video") return downloadVideo(browser, message, sender);
   const result = queue.then(() => handle(message, sender));
   queue = result.catch(() => {});
   return result.catch(() => ({ok: false, reason: "Could not complete automatic login. Open settings to check your configuration."}));

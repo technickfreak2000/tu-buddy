@@ -9,6 +9,7 @@ let navigationStarted, tabUpdated;
 let installed, started;
 const removed = [];
 let beforeTabGet;
+const videoDownloads = [];
 const tabs = new Map();
 let nextTabId = 100;
 function area(store) {
@@ -17,6 +18,7 @@ function area(store) {
     remove: async key => { delete store[key]; }};
 }
 globalThis.browser = {
+  downloads: {download: async options => { videoDownloads.push(options); return 55; }},
   storage: {local: area(local), session: area(session)},
   action: {setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {}, setTitle: async () => {}},
   alarms: {create: () => {}, onAlarm: {addListener: () => {}}},
@@ -50,6 +52,19 @@ beforeEach(() => {
   nextTabId = 100;
   removed.length = 0;
   beforeTabGet = null;
+  videoDownloads.length = 0;
+});
+test("manual video downloads use the downloads API while automatic login is paused", async () => {
+  const url = "https://isis.tu-berlin.de/mod/videoservice/view.php/cm/1/video/2/view";
+  local.pauseReason = "Paused from the toolbar.";
+  tabs.set(1, {id: 1, url, cookieStoreId: "firefox-container-2"});
+  const result = await send({type: "download-video", url: "https://isis.tu-berlin.de/mod/videoservice/file.php/fixture.mp4",
+    filename: "Lecture.mp4"}, {...isis, url});
+  assert.equal(result.ok, true);
+  assert.equal(result.downloadId, 55);
+  assert.equal(videoDownloads.length, 1);
+  assert.equal(videoDownloads[0].cookieStoreId, "firefox-container-2");
+  assert.equal(local.pauseReason, "Paused from the toolbar.");
 });
 const guestSuccessUrl = "https://radius-01.tu-berlin.de:8443/portal/AupSubmit.action?from=AUP";
 test("guest Success title closes a still-loading background tab without any content-script message", async () => {

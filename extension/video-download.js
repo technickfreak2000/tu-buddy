@@ -2,7 +2,7 @@
   const ISIS = "https://isis.tu-berlin.de";
   if (window.top !== window || location.origin !== ISIS) return;
   const marker = "data-tu-buddy-video-download";
-  const links = new Map();
+  const controls = new Map();
   let timer;
 
   function sourceFor(video) {
@@ -40,11 +40,9 @@
     const suffix = videos.length > 1 ? ` - ${videos.indexOf(video) + 1}` : "";
     return `${name}${suffix}${source.pathname.match(/\.[^.]+$/)[0].toLowerCase()}`;
   }
-  function updateLink(link, video, source) {
+  function updateButton(button, video, source) {
     const filename = filenameFor(video, source);
-    if (link.href !== source.href) link.href = source.href;
-    if (link.download !== filename) link.download = filename;
-    if (link.title !== `Download ${filename}`) link.title = `Download ${filename}`;
+    if (button.title !== `Download ${filename}`) button.title = `Download ${filename}`;
   }
   function refresh() {
     clearTimeout(timer);
@@ -59,36 +57,56 @@
             const source = sourceFor(video);
             if (!source) continue;
             available.add(video);
-            let link = links.get(video);
-            if (!link?.isConnected) {
-              link = document.createElement("a");
-              link.setAttribute(marker, "");
-              link.className = "btn btn-outline-secondary btn-sm tu-buddy-video-download";
-              link.style.marginInlineStart = "8px";
+            let entry = controls.get(video);
+            if (!entry?.button.isConnected) {
+              entry?.status.remove();
+              const button = document.createElement("button");
+              button.type = "button";
+              button.setAttribute(marker, "");
+              button.className = "btn btn-outline-secondary btn-sm tu-buddy-video-download";
+              button.style.marginInlineStart = "8px";
+              const status = document.createElement("span");
+              status.className = "text-muted small";
+              status.setAttribute("role", "status");
+              status.style.marginInlineStart = "8px";
               const icon = document.createElement("i");
               icon.className = "icon fa fa-download fa-fw";
               icon.setAttribute("aria-hidden", "true");
-              link.append(icon, document.createTextNode("Download"));
-              link.addEventListener("click", event => {
+              button.append(icon, document.createTextNode("Download"));
+              button.addEventListener("click", async event => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (button.disabled) return;
                 const latest = video.isConnected && sourceFor(video);
                 if (!latest || !video.closest(".video-view") || !/^\/mod\/videoservice\/view\.php(?:\/|$)/.test(location.pathname)) {
-                  event.preventDefault(); refresh(); return;
+                  refresh(); return;
                 }
                 // Re-read on click so Vue navigation cannot leave a stale video URL.
-                updateLink(link, video, latest);
+                updateButton(button, video, latest);
+                button.disabled = true;
+                status.textContent = "Starting download…";
+                try {
+                  const result = await browser.runtime.sendMessage({type: "download-video", url: latest.href,
+                    filename: filenameFor(video, latest)});
+                  status.textContent = result?.ok ? "Download started in Firefox." :
+                    result?.reason || "Could not start the download. Reload the extension and try again.";
+                } catch {
+                  status.textContent = "Could not start the download. Reload the extension and try again.";
+                } finally { button.disabled = false; }
               });
               const info = box.querySelector(".video-info");
               const tools = info?.querySelector(":scope > span:last-child") || info || box;
-              tools.append(link);
-              links.set(video, link);
+              tools.append(button, status);
+              entry = {button, status};
+              controls.set(video, entry);
             }
-            updateLink(link, video, source);
+            updateButton(entry.button, video, source);
           }
         }
       }
     }
-    for (const [video, link] of links) {
-      if (!available.has(video)) { link.remove(); links.delete(video); }
+    for (const [video, entry] of controls) {
+      if (!available.has(video)) { entry.button.remove(); entry.status.remove(); controls.delete(video); }
     }
   }
   function schedule() {
