@@ -80,7 +80,7 @@
       const password = firstVisible(form, 'input[name="j_password"][type="password"]');
       if (username && password) return {kind: "password", form, button, username, password, action: action.href};
       // Never guess a TAN-list challenge or submit password-change / consent / enrollment forms.
-      const otp = firstVisible(form, 'input[autocomplete="one-time-code"], input[name="j_tokenNumber"], input[name="j_token"], input[name="j_otp"], input[name="otp"], input[name="totp"]');
+      const otp = firstVisible(form, 'input[autocomplete="one-time-code"], input[name="j_tokenNumber"], input[name="j_token"], input[name="j_otp"], input[name="j_totp"], input[name="otp"], input[name="totp"]');
       if (otp && !password && !form.querySelector('input[name="SAMLResponse"], input[name="newPassword"]')) {
         const text = form.textContent || "";
         const tokenField = ["j_tokenNumber", "j_token"].includes(otp.name);

@@ -1,0 +1,10 @@
+<!doctype html><title>Web Login Service</title>
+<!-- Prompt from the user's TU screenshot; input and Continue attributes provided
+     from Inspect. Styling, password-manager artwork and live tokens omitted. -->
+<form action="/idp/profile/SAML2/Redirect/SSO?execution=e1s2" method="post">
+  <p>Please enter a code you generated with your 2-factor authentication app.</p>
+  <input type="hidden" name="csrf" value="fixture-only">
+  <label for="j_totp">Code:</label>
+  <input class="form-element" id="j_totp" name="j_totp" type="text" autofocus>
+  <button class="tub_login_button" type="submit" name="_eventId_proceed" onclick="this.childNodes[0].nodeValue='Logging in, please wait...'">Continue</button>
+</form>

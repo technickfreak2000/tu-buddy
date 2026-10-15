@@ -87,6 +87,21 @@ test("never obtains another OTP before the requested wait elapses", async () => 
     assert.equal(p.submits[0].fields.j_tokenNumber, "654321");
   } finally { p.dom.window.close(); }
 });
+test("fills TU's j_totp field and clicks the inspected Continue submitter once", async () => {
+  const html = await readFile(new URL("fixtures/otp-app-code.html", import.meta.url), "utf8");
+  const p = setup(html, message => message.type === "otp" ? {ok: true, code: "654321"} : {ok: false});
+  try {
+    await until(() => p.submits.length === 1);
+    assert.equal(p.submits[0].fields.j_totp, "654321");
+    assert.equal(p.submits[0].fields.csrf, "fixture-only");
+    assert.equal(p.submits[0].submitter.name, "_eventId_proceed");
+    assert.equal(p.messages.filter(m => m.type === "otp").length, 1);
+    p.doc.body.append(p.doc.createElement("div"));
+    await delay(350);
+    assert.equal(p.submits.length, 1);
+    assert.equal(p.messages.some(m => m.type === "password"), false);
+  } finally { p.dom.window.close(); }
+});
 const guestUrl = "https://radius-01.tu-berlin.de:8443/portal/PortalSetup.action";
 test("guest login fills the verified fields and preserves the portal's CSRF token", async () => {
   const html = await readFile(new URL("fixtures/guest-login.html", import.meta.url), "utf8");

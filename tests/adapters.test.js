@@ -71,6 +71,29 @@ test("detects TOTP but leaves TAN lists, consent, reset and token-enrollment for
     assert.equal((await page(html)).plan(), null);
   }
 });
+test("recognizes TU's inspected j_totp input and Continue button at execution e1s2", async () => {
+  const p = await page("otp-app-code.html");
+  assert.equal(p.plan().kind, "otp");
+  assert.equal(p.plan().otp.name, "j_totp");
+  assert.equal(p.plan().button.name, "_eventId_proceed");
+  assert.equal(new URL(p.plan().action).searchParams.get("execution"), "e1s2");
+  p.dom.window.close();
+});
+test("the j_totp form retains destination checks and TAN/reset exclusions", async () => {
+  for (const mutate of [
+    doc => doc.forms[0].action = "https://attacker.test/",
+    doc => doc.forms[0].method = "get",
+    doc => doc.querySelector("button").setAttribute("formaction", "https://attacker.test/"),
+    doc => doc.querySelector("button").setAttribute("formtarget", "_blank"),
+    doc => doc.querySelector("button").disabled = true,
+    doc => doc.querySelector("label").textContent = "TAN number 24 from your TAN-Liste",
+    doc => doc.forms[0].insertAdjacentHTML("beforeend", '<input name="newPassword">')
+  ]) {
+    const p = await page("otp-app-code.html");
+    mutate(p.doc); assert.equal(p.plan(), null);
+    p.dom.window.close();
+  }
+});
 test("login errors and logout controls are recognized", async () => {
   const {api, doc} = await page('<p class="form-error">Incorrect password</p><a id="out" href="/idp/profile/Logout">Logout</a>');
   assert.equal(api.loginError(doc), true);
