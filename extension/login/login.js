@@ -78,7 +78,7 @@ async function load() {
     $("intro").textContent = "TU reported an error after an automatic sign-in attempt. Automatic login is paused. Check your username, password and TOTP setup secret, then save to try again.";
   }
   if (info.canReturn) {
-    const label = {idp: "TU single sign-on", guest: "TUB-Guest Wi-Fi", isis: "ISIS", moses: "Moses"}[info.service] || "TU login";
+    const label = {idp: "TU single sign-on", guest: "TUB-Guest Wi-Fi", isis: "ISIS", moses: "Moses", tuport: "TUport"}[info.service] || "TU login";
     $("destination").textContent = `Continue to ${label} after saving`;
     $("destination").hidden = false;
   }

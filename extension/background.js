@@ -6,10 +6,33 @@ import {createLoginSetup} from "./lib/login-setup.js";
 const SETTINGS_KEY = "settings";
 const STATE_KEY = "runtime";
 const LEGACY_LOGIN_ERROR = "TU reported a login error. Check the page and your credentials, then use Resume.";
+const ENTRY_SERVICES = ["isis", "moses", "tuport"];
 let queue = Promise.resolve();
 const discoverGuest = createGuestDiscovery(browser, settings, async () => Boolean((await state()).paused));
 const loginSetup = createLoginSetup(browser);
 
+// TUport redirects to Shibboleth before a content script can run. Remember only
+// the service name per tab so its switch still applies on the shared login host.
+async function trackService(tabId, url) {
+  const service = classifyUrl(url);
+  const tabs = (await browser.storage.session.get("serviceTabs")).serviceTabs || {};
+  if (service === "idp") return tabs[tabId] || "";
+  const next = ENTRY_SERVICES.includes(service) ? service : "";
+  if ((tabs[tabId] || "") !== next) {
+    if (next) tabs[tabId] = next;
+    else delete tabs[tabId];
+    await browser.storage.session.set({serviceTabs: tabs});
+  }
+  return next;
+}
+async function settleTab(tabId, runtime = null) {
+  runtime ||= await state();
+  let changed = false;
+  for (const attempt of runtime.attempts) {
+    if (attempt.tabId === tabId && !attempt.settled) { attempt.settled = true; changed = true; }
+  }
+  if (changed) await persist(runtime);
+}
 async function settings() {
   return {...DEFAULT_SETTINGS, ...(await browser.storage.local.get(SETTINGS_KEY))[SETTINGS_KEY]};
 }
@@ -69,7 +92,7 @@ async function handle(message, sender) {
   }
   if (message.type === "status" && own) {
     return {enabled: config.enabled, paused: runtime.paused, hasPassword: Boolean(config.username && config.password),
-      hasTotp: Boolean(config.totp), isis: config.isis, moses: config.moses, guest: config.guest};
+      hasTotp: Boolean(config.totp), isis: config.isis, moses: config.moses, tuport: config.tuport, guest: config.guest};
   }
   if (message.type === "discover-guest" && own) return discoverGuest(true);
   if (message.type === "pause") {
@@ -86,7 +109,7 @@ async function handle(message, sender) {
   }
   if (message.type === "save" && own) {
     const next = message.settings;
-    if (!next || ["enabled", "isis", "moses", "guest", "acceptGuestTerms", "guestNative"].some(k => typeof next[k] !== "boolean") ||
+    if (!next || ["enabled", "isis", "moses", "tuport", "guest", "acceptGuestTerms", "guestNative"].some(k => typeof next[k] !== "boolean") ||
         ["username", "password", "totp"].some(k => typeof next[k] !== "string" || next[k].length > 4096)) {
       throw new Error("Invalid settings.");
     }
@@ -105,7 +128,8 @@ async function handle(message, sender) {
   }
   if (!trusted) return null;
   const service = classifyUrl(sender.url);
-  const active = config.enabled && !runtime.paused && (service === "idp" || config[service]);
+  const entryService = await trackService(sender.tab.id, sender.url);
+  const active = config.enabled && !runtime.paused && (service === "idp" ? !entryService || config[entryService] : config[service]);
   const hasLoginAttempt = runtime.attempts.some(attempt => attempt.tabId === sender.tab.id &&
     !attempt.settled && ["password", "otp"].includes(attempt.kind));
   if (message.type === "check") return {active, acceptGuestTerms: config.acceptGuestTerms,
@@ -120,11 +144,7 @@ async function handle(message, sender) {
     return loginSetup.open(sender);
   }
   if (message.type === "success" && service !== "idp") {
-    let changed = false;
-    for (const attempt of runtime.attempts) {
-      if (attempt.tabId === sender.tab.id && !attempt.settled) { attempt.settled = true; changed = true; }
-    }
-    if (changed) await persist(runtime);
+    await settleTab(sender.tab.id, runtime);
     return {ok: true};
   }
   if (message.type === "failure") {
@@ -177,7 +197,23 @@ browser.runtime.onMessage.addListener((message, sender) => {
   return result.catch(() => ({ok: false, reason: "Could not complete automatic login. Open settings to check your configuration."}));
 });
 browser.tabs.onRemoved.addListener(tabId => {
-  queue = queue.then(() => loginSetup.closed(tabId)).catch(() => {});
+  queue = queue.then(async () => {
+    await loginSetup.closed(tabId);
+    await trackService(tabId, "");
+  }).catch(() => {});
+});
+browser.webNavigation.onBeforeNavigate.addListener(details => {
+  if (details.frameId !== 0) return;
+  queue = queue.then(() => trackService(details.tabId, details.url)).catch(() => {});
+});
+browser.tabs.onUpdated.addListener((tabId, change, tab) => {
+  if (!change.url && change.status !== "complete") return;
+  queue = queue.then(async () => {
+    const url = change.url || tab.url || "";
+    await trackService(tabId, url);
+    // Returning to the SAP site ends this login flow; attempt counts remain for rate limiting.
+    if (change.status === "complete" && classifyUrl(url) === "tuport") await settleTab(tabId);
+  }).catch(() => {});
 });
 browser.runtime.onInstalled.addListener(async details => {
   await badge();

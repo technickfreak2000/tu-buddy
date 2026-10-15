@@ -106,7 +106,7 @@
     if (target) {
       try {
         const url = new URL(target, href);
-        if (["https://isis.tu-berlin.de", "https://moseskonto.tu-berlin.de", IDP, GUEST].includes(url.origin) &&
+        if (["https://isis.tu-berlin.de", "https://moseskonto.tu-berlin.de", "https://tuport.sap.tu-berlin.de", IDP, GUEST].includes(url.origin) &&
             /(?:\/logout(?:\.|\/|$)|\/Logout(?:\?|$)|\/profile\/Logout)/i.test(url.pathname)) return true;
       } catch { /* Also check explicit logout UI below. */ }
     }

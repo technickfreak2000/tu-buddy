@@ -5,6 +5,7 @@ import {DEFAULT_SETTINGS} from "../extension/lib/policy.js";
 const local = {}, session = {};
 let listener;
 let tabRemoved;
+let navigationStarted, tabUpdated;
 const tabs = new Map();
 let nextTabId = 100;
 function area(store) {
@@ -17,8 +18,10 @@ globalThis.browser = {
   action: {setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {}, setTitle: async () => {}},
   alarms: {create: () => {}, onAlarm: {addListener: () => {}}},
   captivePortal: {onStateChanged: {addListener: () => {}}},
+  webNavigation: {onBeforeNavigate: {addListener: fn => { navigationStarted = fn; }}},
   tabs: {
     onRemoved: {addListener: fn => { tabRemoved = fn; }},
+    onUpdated: {addListener: fn => { tabUpdated = fn; }},
     get: async id => { if (!tabs.has(id)) throw new Error("No such tab"); return tabs.get(id); },
     create: async properties => { const tab = {...properties, id: nextTabId++}; tabs.set(tab.id, tab); return tab; },
     update: async (id, properties) => { if (!tabs.has(id)) throw new Error("No such tab"); Object.assign(tabs.get(id), properties); return tabs.get(id); }
@@ -104,7 +107,66 @@ test("unrelated errors and disabled services cannot pause credential handling", 
   await send({type: "resume"});
   local.settings.isis = false;
   assert.equal((await send({type: "check"}, isis)).active, false);
+  assert.equal((await send({type: "check"}, {...idp, tab: {id: 2}})).active, true);
+});
+const tuportUrl = "https://tuport.sap.tu-berlin.de/";
+test("TUport redirects use the saved account followed by a generated TOTP on Shibboleth", async () => {
+  navigationStarted({tabId: 1, frameId: 0, url: tuportUrl});
+  tabUpdated(1, {url: sso}, {url: sso});
   assert.equal((await send({type: "check"}, idp)).active, true);
+  assert.equal((await send({type: "password", action: sso}, idp)).password, config.password);
+  tabUpdated(1, {status: "complete"}, {url: sso});
+  const otpStep = sso.replace("e1s2", "e1s3");
+  const originalNow = Date.now;
+  Date.now = () => Math.floor(originalNow() / 30000) * 30000 + 1000;
+  try {
+    const otp = await send({type: "otp", action: otpStep}, {...idp, url: otpStep});
+    assert.match(otp.code, /^\d{6}$/);
+    assert.equal(otp.secret, undefined);
+    assert.equal(session.runtime.attempts.every(a => !a.settled), true);
+    tabUpdated(1, {url: tuportUrl, status: "complete"}, {url: tuportUrl});
+    await send({type: "status"});
+    assert.equal(session.runtime.attempts.every(a => a.settled), true);
+    assert.equal((await send({type: "password", action: sso}, idp)).ok, true);
+  } finally { Date.now = originalNow; }
+  assert.deepEqual(session.serviceTabs, {1: "tuport"});
+  assert.equal(JSON.stringify(session).includes("SAMLRequest"), false);
+});
+test("TUport's service switch blocks both account and OTP steps after its redirect", async () => {
+  local.settings.tuport = false;
+  navigationStarted({tabId: 1, frameId: 0, url: tuportUrl});
+  tabUpdated(1, {url: sso}, {url: sso});
+  assert.equal((await send({type: "check"}, idp)).active, false);
+  assert.equal((await send({type: "password", action: sso}, idp)).ok, false);
+  assert.equal((await send({type: "otp", action: sso}, idp)).ok, false);
+  assert.equal((await send({type: "check"}, {...idp, tab: {id: 2}})).active, true);
+  assert.equal(session.runtime, undefined);
+  tabUpdated(1, {url: "https://example.org/"}, {url: "https://example.org/"});
+  assert.equal((await send({type: "check"}, idp)).active, true);
+});
+test("TUport inside a frame cannot change the top-level SSO service switch", async () => {
+  local.settings.tuport = false;
+  navigationStarted({tabId: 1, frameId: 7, url: tuportUrl});
+  assert.equal((await send({type: "check"}, idp)).active, true);
+  assert.equal(session.serviceTabs, undefined);
+});
+test("unconfigured TUport opens extension setup on its Shibboleth account form", async () => {
+  local.settings = {...DEFAULT_SETTINGS};
+  navigationStarted({tabId: 1, frameId: 0, url: tuportUrl});
+  const check = await send({type: "check"}, idp);
+  assert.equal(check.needsSetup, true);
+  assert.equal(check.active, true);
+  assert.equal((await send({type: "open-setup", step: "password", action: sso}, idp)).opened, true);
+  assert.equal(session.runtime, undefined);
+  tabRemoved(1);
+  await send({type: "status"});
+  assert.equal(session.serviceTabs[1], undefined);
+});
+test("the SAP host never receives passwords or generated OTPs from extension messages", async () => {
+  const sender = {url: tuportUrl, tab: {id: 1}, frameId: 0};
+  for (const type of ["password", "otp", "guest-password"]) {
+    assert.equal(await send({type, action: tuportUrl}, sender), null);
+  }
 });
 test("OTP waits near expiry and is not reused across tabs or Resume", async () => {
   const original = Date.now;

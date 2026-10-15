@@ -7,7 +7,17 @@ test("exact HTTPS origins and SSO paths only", () => {
   assert.equal(classifyUrl(idp), "idp");
   assert.equal(classifyUrl("https://isis.tu-berlin.de/login/index.php"), "isis");
   assert.equal(classifyUrl("https://moseskonto.tu-berlin.de/moses/index.html"), "moses");
+  assert.equal(classifyUrl("https://tuport.sap.tu-berlin.de/"), "tuport");
   for (const bad of ["http://shibboleth.tubit.tu-berlin.de/idp/profile/SAML2/Redirect/SSO", "https://shibboleth.tubit.tu-berlin.de.attacker.test/idp/profile/SAML2/Redirect/SSO", "https://shibboleth.tubit.tu-berlin.de/pwr-reset.html", "https://user:pass@shibboleth.tubit.tu-berlin.de/idp/profile/SAML2/Redirect/SSO", "https://shibboleth.tubit.tu-berlin.de:8443/idp/profile/SAML2/Redirect/SSO", "https://other.tu-berlin.de/", "not a url"]) assert.equal(classifyUrl(bad), null, bad);
+});
+test("TUport is a trusted service only on its exact HTTPS origin, never a credential destination", () => {
+  const url = "https://tuport.sap.tu-berlin.de/";
+  assert.equal(trustedSender({url, tab: {id: 1}, frameId: 0}), true);
+  assert.equal(safeFormAction(url, url), false);
+  for (const bad of [url.replace("https:", "http:"), url.replace(".de/", ".de.attacker.test/"),
+    url.replace(".de/", ".de:8443/"), url.replace("https://", "https://user:pass@")]) {
+    assert.equal(classifyUrl(bad), null);
+  }
 });
 test("credentials require a top-level trusted tab and trusted form action", () => {
   assert.equal(trustedSender({url: idp, tab: {id: 1}, frameId: 0}), true);
