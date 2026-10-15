@@ -33,6 +33,14 @@ export function trustedSender(sender) {
   return Number.isInteger(sender.tab?.id) && sender.frameId === 0 && Boolean(classifyUrl(sender.url));
 }
 
+export function isGuestSuccess(url, title) {
+  try {
+    const page = new URL(url);
+    return classifyUrl(url) === "guest" && page.pathname === "/portal/AupSubmit.action" &&
+      !page.hash && typeof title === "string" && /^success$/i.test(title.trim());
+  } catch { return false; }
+}
+
 export function safeFormAction(action, page) {
   try {
     const target = new URL(action, page);

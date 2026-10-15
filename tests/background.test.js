@@ -6,6 +6,9 @@ const local = {}, session = {};
 let listener;
 let tabRemoved;
 let navigationStarted, tabUpdated;
+let installed, started;
+const removed = [];
+let beforeTabGet;
 const tabs = new Map();
 let nextTabId = 100;
 function area(store) {
@@ -22,12 +25,14 @@ globalThis.browser = {
   tabs: {
     onRemoved: {addListener: fn => { tabRemoved = fn; }},
     onUpdated: {addListener: fn => { tabUpdated = fn; }},
-    get: async id => { if (!tabs.has(id)) throw new Error("No such tab"); return tabs.get(id); },
+    get: async id => { beforeTabGet?.(id); if (!tabs.has(id)) throw new Error("No such tab"); return {...tabs.get(id)}; },
+    remove: async id => { removed.push(id); tabs.delete(id); tabRemoved(id); },
+    query: async () => [...tabs.values()].map(tab => ({...tab})),
     create: async properties => { const tab = {...properties, id: nextTabId++}; tabs.set(tab.id, tab); return tab; },
     update: async (id, properties) => { if (!tabs.has(id)) throw new Error("No such tab"); Object.assign(tabs.get(id), properties); return tabs.get(id); }
   },
   runtime: {getURL: path => `moz-extension://test/${path}`, onMessage: {addListener: fn => { listener = fn; }},
-    onInstalled: {addListener: () => {}}, onStartup: {addListener: () => {}}, openOptionsPage: async () => {}}
+    onInstalled: {addListener: fn => { installed = fn; }}, onStartup: {addListener: fn => { started = fn; }}, openOptionsPage: async () => {}}
 };
 await import("../extension/background.js");
 const own = {url: "moz-extension://test/options/options.html"};
@@ -43,6 +48,62 @@ beforeEach(() => {
   tabs.clear();
   tabs.set(1, {id: 1, url: sso});
   nextTabId = 100;
+  removed.length = 0;
+  beforeTabGet = null;
+});
+const guestSuccessUrl = "https://radius-01.tu-berlin.de:8443/portal/AupSubmit.action?from=AUP";
+test("guest Success title closes a still-loading background tab without any content-script message", async () => {
+  const tab = {id: 3, url: guestSuccessUrl, title: "Success", status: "loading", active: false};
+  tabs.set(3, tab);
+  session.runtime = {attempts: [{kind: "guest-terms", tabId: 3, flow: "guest:/portal/AupSubmit.action", at: Date.now()}]};
+  tabUpdated(3, {title: "Success"}, tab);
+  await send({type: "status"});
+  assert.deepEqual(removed, [3]);
+  assert.equal(session.runtime.attempts[0].settled, true);
+});
+test("guest login and policy pages remain open, even with a stale Success title on navigation", async () => {
+  for (const [url, title, change] of [
+    [guestSuccessUrl, "Acceptable Use Policy", {title: "Acceptable Use Policy"}],
+    [guestSuccessUrl.replace("AupSubmit", "LoginSubmit"), "Success", {title: "Success"}],
+    [guestSuccessUrl.replace(":8443", ""), "Success", {title: "Success"}],
+    [guestSuccessUrl, "Success", {url: guestSuccessUrl, status: "loading"}]
+  ]) {
+    const tab = {id: 3, url, title, status: "loading"}; tabs.set(3, tab);
+    tabUpdated(3, change, tab);
+    await send({type: "status"});
+  }
+  assert.deepEqual(removed, []);
+});
+test("guest auto-close respects the enable switch, guest switch and toolbar pause", async () => {
+  for (const setting of ["enabled", "guest", "paused"]) {
+    local.settings = {...config}; local.pauseReason = "";
+    if (setting === "paused") local.pauseReason = "Paused from the toolbar.";
+    else local.settings[setting] = false;
+    const tab = {id: 3, url: guestSuccessUrl, title: "Success"}; tabs.set(3, tab);
+    tabUpdated(3, {title: "Success"}, tab);
+    await send({type: "status"});
+  }
+  assert.deepEqual(removed, []);
+});
+test("guest auto-close rechecks the tab after success settlement before removing it", async () => {
+  const tab = {id: 3, url: guestSuccessUrl, title: "Success"}; tabs.set(3, tab);
+  let reads = 0;
+  beforeTabGet = id => { if (id === 3 && ++reads === 2) tabs.set(3, {id: 3, url: "https://isis.tu-berlin.de/", title: "ISIS"}); };
+  tabUpdated(3, {title: "Success"}, tab);
+  await send({type: "status"});
+  assert.deepEqual(removed, []);
+});
+test("already successful guest tabs close after an extension update or browser startup", async () => {
+  for (const event of [() => installed({reason: "update"}), () => started()]) {
+    tabs.set(3, {id: 3, url: guestSuccessUrl, title: "Success", status: "loading"});
+    local.settings.guestNative = false;
+    globalThis.browser.captivePortal.getState = async () => "not_captive";
+    await event();
+    await send({type: "status"});
+    assert.equal(tabs.has(3), false);
+    assert.equal(tabs.has(1), true);
+  }
+  assert.deepEqual(removed, [3, 3]);
 });
 test("only own extension pages can edit settings or resume", async () => {
   for (const sender of [isis, idp, {url: "https://attacker.test/", tab: {id: 1}, frameId: 0}]) {

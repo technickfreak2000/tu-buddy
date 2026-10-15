@@ -1,8 +1,19 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {classifyUrl, safeFormAction, trustedSender, freshState, reserveAttempt, WINDOW_MS} from "../extension/lib/policy.js";
+import {classifyUrl, safeFormAction, trustedSender, isGuestSuccess, freshState, reserveAttempt, WINDOW_MS} from "../extension/lib/policy.js";
 
 const idp = "https://shibboleth.tubit.tu-berlin.de/idp/profile/SAML2/Redirect/SSO?execution=e1s2";
+test("guest completion requires the pinned post-AGB endpoint and an exact Success title", () => {
+  const url = "https://radius-01.tu-berlin.de:8443/portal/AupSubmit.action?from=AUP";
+  assert.equal(isGuestSuccess(url, "Success"), true);
+  assert.equal(isGuestSuccess(url, " success "), true);
+  for (const bad of [url.replace("https:", "http:"), url.replace(":8443", ""),
+    url.replace(".de:", ".de.attacker.test:"), url.replace("https://", "https://user:pass@"),
+    url.replace("AupSubmit", "LoginSubmit"), url + "#Success"]) assert.equal(isGuestSuccess(bad, "Success"), false);
+  for (const title of ["Acceptable Use Policy", "Login", "Success pending", "Not a success", "", undefined]) {
+    assert.equal(isGuestSuccess(url, title), false);
+  }
+});
 test("exact HTTPS origins and SSO paths only", () => {
   assert.equal(classifyUrl(idp), "idp");
   assert.equal(classifyUrl("https://isis.tu-berlin.de/login/index.php"), "isis");

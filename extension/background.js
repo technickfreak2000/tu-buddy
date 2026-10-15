@@ -1,4 +1,4 @@
-import {DEFAULT_SETTINGS, classifyUrl, trustedSender, safeFormAction, safeGuestAction, freshState, reserveAttempt} from "./lib/policy.js";
+import {DEFAULT_SETTINGS, classifyUrl, trustedSender, safeFormAction, safeGuestAction, isGuestSuccess, freshState, reserveAttempt} from "./lib/policy.js";
 import {parseTotp, generateTotp} from "./lib/totp.js";
 import {createGuestDiscovery, GUEST_ALARM} from "./lib/guest-discovery.js";
 import {createLoginSetup} from "./lib/login-setup.js";
@@ -32,6 +32,26 @@ async function settleTab(tabId, runtime = null) {
     if (attempt.tabId === tabId && !attempt.settled) { attempt.settled = true; changed = true; }
   }
   if (changed) await persist(runtime);
+}
+async function closeGuestSuccess(tabId, expectedUrl) {
+  const [config, runtime] = await Promise.all([settings(), state()]);
+  if (!config.enabled || !config.guest || runtime.paused) return false;
+  try {
+    const tab = await browser.tabs.get(tabId);
+    if (tab.url !== expectedUrl || !isGuestSuccess(tab.url, tab.title)) return false;
+    await settleTab(tabId, runtime);
+    // The user may have navigated during the storage writes. Never close that new page.
+    const latest = await browser.tabs.get(tabId);
+    if (latest.url !== expectedUrl || !isGuestSuccess(latest.url, latest.title)) return false;
+    await browser.tabs.remove(tabId);
+    return true;
+  } catch { return false; /* The portal tab may already have closed. */ }
+}
+async function closeExistingGuestSuccess() {
+  const tabs = await browser.tabs.query({url: "https://radius-01.tu-berlin.de/portal/*"});
+  for (const tab of tabs) {
+    if (isGuestSuccess(tab.url, tab.title)) await closeGuestSuccess(tab.id, tab.url);
+  }
 }
 async function settings() {
   return {...DEFAULT_SETTINGS, ...(await browser.storage.local.get(SETTINGS_KEY))[SETTINGS_KEY]};
@@ -145,6 +165,7 @@ async function handle(message, sender) {
   }
   if (message.type === "success" && service !== "idp") {
     await settleTab(sender.tab.id, runtime);
+    if (service === "guest") await closeGuestSuccess(sender.tab.id, sender.url);
     return {ok: true};
   }
   if (message.type === "failure") {
@@ -207,21 +228,27 @@ browser.webNavigation.onBeforeNavigate.addListener(details => {
   queue = queue.then(() => trackService(details.tabId, details.url)).catch(() => {});
 });
 browser.tabs.onUpdated.addListener((tabId, change, tab) => {
-  if (!change.url && change.status !== "complete") return;
+  if (!change.url && change.status !== "complete" && typeof change.title !== "string") return;
   queue = queue.then(async () => {
     const url = change.url || tab.url || "";
     await trackService(tabId, url);
     // Returning to the SAP site ends this login flow; attempt counts remain for rate limiting.
     if (change.status === "complete" && classifyUrl(url) === "tuport") await settleTab(tabId);
+    // Cisco can show Success while its spinner keeps loading forever. A title
+    // update arrives independently of DOMContentLoaded, load and content scripts.
+    if ((typeof change.title === "string" || change.status === "complete") &&
+        isGuestSuccess(url, change.title ?? tab.title)) await closeGuestSuccess(tabId, url);
   }).catch(() => {});
 });
 browser.runtime.onInstalled.addListener(async details => {
   await badge();
+  await closeExistingGuestSuccess();
   browser.alarms.create(GUEST_ALARM, {periodInMinutes: 1});
   if (details.reason === "install") await browser.runtime.openOptionsPage();
 });
 browser.runtime.onStartup.addListener(async () => {
   await badge();
+  await closeExistingGuestSuccess();
   browser.alarms.create(GUEST_ALARM, {periodInMinutes: 1});
   await discoverGuest(false);
 });
