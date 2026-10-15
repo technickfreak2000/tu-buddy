@@ -1,9 +1,11 @@
-import {DEFAULT_SETTINGS, classifyUrl, trustedSender, safeFormAction, freshState, reserveAttempt} from "./lib/policy.js";
+import {DEFAULT_SETTINGS, classifyUrl, trustedSender, safeFormAction, safeGuestAction, freshState, reserveAttempt} from "./lib/policy.js";
 import {parseTotp, generateTotp} from "./lib/totp.js";
+import {createGuestDiscovery, GUEST_ALARM} from "./lib/guest-discovery.js";
 
 const SETTINGS_KEY = "settings";
 const STATE_KEY = "runtime";
 let queue = Promise.resolve();
+const discoverGuest = createGuestDiscovery(browser, settings, async () => Boolean((await state()).paused));
 
 async function settings() {
   return {...DEFAULT_SETTINGS, ...(await browser.storage.local.get(SETTINGS_KEY))[SETTINGS_KEY]};
@@ -38,8 +40,9 @@ async function handle(message, sender) {
   const [config, runtime] = await Promise.all([settings(), state()]);
   if (message.type === "status" && own) {
     return {enabled: config.enabled, paused: runtime.paused, hasPassword: Boolean(config.username && config.password),
-      hasTotp: Boolean(config.totp), isis: config.isis, moses: config.moses};
+      hasTotp: Boolean(config.totp), isis: config.isis, moses: config.moses, guest: config.guest};
   }
+  if (message.type === "discover-guest" && own) return discoverGuest(true);
   if (message.type === "pause") {
     if (!own && message.reason !== "logout") return null;
     runtime.paused = message.reason === "logout" ? "You logged out. Use Resume when you want automatic login again." : "Paused from the toolbar.";
@@ -54,7 +57,7 @@ async function handle(message, sender) {
   }
   if (message.type === "save" && own) {
     const next = message.settings;
-    if (!next || ["enabled", "isis", "moses"].some(k => typeof next[k] !== "boolean") ||
+    if (!next || ["enabled", "isis", "moses", "guest", "acceptGuestTerms", "guestNative"].some(k => typeof next[k] !== "boolean") ||
         ["username", "password", "totp"].some(k => typeof next[k] !== "string" || next[k].length > 4096)) {
       throw new Error("Invalid settings.");
     }
@@ -74,7 +77,7 @@ async function handle(message, sender) {
   if (!trusted) return null;
   const service = classifyUrl(sender.url);
   const active = config.enabled && !runtime.paused && (service === "idp" || config[service]);
-  if (message.type === "check") return {active};
+  if (message.type === "check") return {active, acceptGuestTerms: config.acceptGuestTerms};
   if (!active) return {ok: false, reason: runtime.paused || "Automatic login is disabled."};
   if (message.type === "success" && service !== "idp") {
     let changed = false;
@@ -89,10 +92,16 @@ async function handle(message, sender) {
     await persist(runtime);
     return {ok: true};
   }
-  if (!["start", "password", "otp"].includes(message.type)) return null;
-  if (message.type === "start" ? service === "idp" : service !== "idp") return null;
-  if (message.type !== "start" && !safeFormAction(message.action, sender.url)) return null;
-  if (message.type === "password" && !(config.username && config.password)) return {ok: false, reason: "Enter your credentials here, or save them in the extension settings."};
+  const guestStep = ["guest-password", "guest-terms"].includes(message.type);
+  if (!["start", "password", "otp", "guest-password", "guest-terms"].includes(message.type)) return null;
+  if (guestStep) {
+    if (service !== "guest" || !safeGuestAction(message.action, sender.url, message.type)) return null;
+    if (message.type === "guest-terms" && !config.acceptGuestTerms) return {ok: false, reason: "Accept the guest network terms here, or enable automatic AGB acceptance in settings."};
+  } else {
+    if (message.type === "start" ? !["isis", "moses"].includes(service) : service !== "idp") return null;
+    if (message.type !== "start" && !safeFormAction(message.action, sender.url)) return null;
+  }
+  if (["password", "guest-password"].includes(message.type) && !(config.username && config.password)) return {ok: false, reason: "Enter your credentials here, or save them in the extension settings."};
   if (message.type === "otp" && !config.totp) return {ok: false, reason: "Enter your current OTP here, or save a TOTP setup secret in settings."};
   const flowUrl = new URL(sender.url);
   // execution identifies Shibboleth's current login step. Never save query strings or SAML messages.
@@ -103,7 +112,8 @@ async function handle(message, sender) {
     if (token.remaining < 4) return {ok: false, retryMs: Math.ceil(token.remaining * 1000) + 150};
     if (token.counter <= runtime.lastOtpCounter) return {ok: false, retryMs: Math.ceil(token.remaining * 1000) + 150};
   }
-  const reason = reserveAttempt(runtime, {kind: message.type, tabId: sender.tab.id, flow});
+  const kind = message.type === "guest-password" ? "password" : message.type;
+  const reason = reserveAttempt(runtime, {kind, tabId: sender.tab.id, flow});
   if (reason) {
     runtime.paused = reason;
     await persist(runtime);
@@ -111,7 +121,7 @@ async function handle(message, sender) {
   }
   if (token) runtime.lastOtpCounter = token.counter;
   await persist(runtime);
-  if (message.type === "password") return {ok: true, username: config.username, password: config.password};
+  if (["password", "guest-password"].includes(message.type)) return {ok: true, username: config.username, password: config.password};
   if (message.type === "otp") return {ok: true, code: token.code};
   return {ok: true};
 }
@@ -123,6 +133,24 @@ browser.runtime.onMessage.addListener((message, sender) => {
 });
 browser.runtime.onInstalled.addListener(async details => {
   await badge();
+  browser.alarms.create(GUEST_ALARM, {periodInMinutes: 1});
   if (details.reason === "install") await browser.runtime.openOptionsPage();
 });
-browser.runtime.onStartup.addListener(() => badge());
+browser.runtime.onStartup.addListener(async () => {
+  await badge();
+  browser.alarms.create(GUEST_ALARM, {periodInMinutes: 1});
+  await discoverGuest(false);
+});
+browser.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name === GUEST_ALARM) return discoverGuest(false).catch(() => {});
+});
+browser.captivePortal.onStateChanged.addListener(async info => {
+  const portalState = typeof info === "string" ? info : info.state || info.details;
+  if (portalState === "locked_portal") await discoverGuest(false).catch(() => {});
+  if (["not_captive", "unlocked_portal"].includes(portalState)) {
+    const stored = await browser.storage.session.get("guestDiscovery");
+    if (stored.guestDiscovery?.browserOpened) {
+      await browser.storage.session.set({guestDiscovery: {...stored.guestDiscovery, browserOpened: false}});
+    }
+  }
+});

@@ -78,3 +78,34 @@ test("login errors and logout controls are recognized", async () => {
   doc.querySelector("p").textContent = "Your ZECM team";
   assert.equal(api.loginError(doc), false);
 });
+const guest = "https://radius-01.tu-berlin.de:8443/portal/PortalSetup.action";
+test("matches the inspected TU guest login form", async () => {
+  const p = await page("guest-login.html", guest);
+  assert.equal(p.plan().kind, "guest-password");
+  assert.equal(p.plan().username.name, "user.username");
+  assert.equal(p.plan().password.name, "user.password");
+  p.doc.forms[0].querySelector('[name="portal"]').value = "another-portal";
+  assert.equal(p.plan(), null);
+});
+test("guest login requires the exact TLS origin, POST action and known portal", async () => {
+  for (const url of [guest.replace(":8443", ""), guest.replace("https:", "http:"), guest.replace(".de:", ".de.attacker.test:")]) {
+    assert.equal((await page("guest-login.html", url)).plan(), null);
+  }
+  for (const mutate of [
+    doc => doc.forms[0].action = "https://attacker.test/portal/LoginSubmit.action",
+    doc => doc.forms[0].method = "get",
+    doc => doc.forms[0].action = "ChangePasswordSubmit.action",
+    doc => doc.querySelector('#ui_login_signon_button').setAttribute("formaction", "https://attacker.test/")
+  ]) {
+    const p = await page("guest-login.html", guest); mutate(p.doc); assert.equal(p.plan(), null);
+  }
+});
+test("guest AGB adapter selects Accept and supports scroll-gated controls", async () => {
+  const p = await page("guest-terms.html", guest);
+  assert.equal(p.plan().kind, "guest-terms");
+  assert.equal(p.plan().button.id, "ui_aup_accept_button");
+  p.doc.querySelector('#ui_aup_accept_button').disabled = true;
+  assert.equal(p.plan().needsScroll, true);
+  p.doc.forms[0].action = "ChangePasswordSubmit.action";
+  assert.equal(p.plan(), null);
+});

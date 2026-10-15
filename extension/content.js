@@ -4,6 +4,7 @@
   let working = false, stopped = false, timer, retryTimer, notice, retryAt = 0;
   let attempted = new WeakSet();
   let reportedSuccess = false;
+  const preparedTerms = new WeakSet();
   const send = message => browser.runtime.sendMessage(message);
 
   function show(message) {
@@ -40,6 +41,22 @@
       }
       const current = plan(document, location.href);
       if (!current || attempted.has(current.form || current.button)) return;
+      if (current.kind === "guest-terms" || current.terms) {
+        if (!status.acceptGuestTerms) {
+          show("Accept the guest network AGB here, or enable automatic acceptance in settings.");
+          return;
+        }
+        if (current.terms && !current.terms.checked) current.terms.click();
+        if (current.needsScroll) {
+          if (!preparedTerms.has(current.form) && current.scrollArea) {
+            preparedTerms.add(current.form);
+            current.scrollArea.scrollTop = current.scrollArea.scrollHeight;
+            current.scrollArea.dispatchEvent(new Event("scroll", {bubbles: true}));
+            setTimeout(schedule, 300);
+          }
+          return;
+        }
+      }
       if (loginError(document)) {
         await send({type: "failure"});
         stopped = true;
@@ -61,7 +78,7 @@
       const latest = plan(document, location.href);
       if (!latest || latest.button !== current.button || latest.kind !== current.kind || latest.action !== current.action) return;
       attempted.add(current.form || current.button);
-      if (current.kind === "password") {
+      if (["password", "guest-password"].includes(current.kind)) {
         fill(current.username, result.username);
         fill(current.password, result.password);
       } else if (current.kind === "otp") fill(current.otp, result.code);
@@ -88,7 +105,7 @@
   document.addEventListener("visibilitychange", () => { if (!document.hidden) schedule(); });
   document.addEventListener("input", event => {
     // Let a person take over a login form without overwriting what they type.
-    if (event.isTrusted && location.hostname === "shibboleth.tubit.tu-berlin.de") stopped = true;
+    if (event.isTrusted && ["shibboleth.tubit.tu-berlin.de", "radius-01.tu-berlin.de"].includes(location.hostname)) stopped = true;
   }, true);
   browser.storage.onChanged.addListener((changes, area) => {
     if ((area === "local" && changes.settings) || (area === "session" && changes.runtime)) {

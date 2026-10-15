@@ -18,4 +18,12 @@ $("toggle").addEventListener("click", async () => {
   } catch { $("detail").textContent = "Could not update state. Reopen this popup to try again."; }
 });
 $("settings").addEventListener("click", () => browser.runtime.openOptionsPage());
+$("find-guest").addEventListener("click", async () => {
+  $("find-guest").disabled = true;
+  try {
+    const result = await browser.runtime.sendMessage({type: "discover-guest"});
+    $("detail").textContent = result?.reason || "Guest-network check completed.";
+  } catch { $("detail").textContent = "Could not check TUB-Guest. Open settings to check the network helper."; }
+  finally { $("find-guest").disabled = false; }
+});
 refresh().catch(error => { $("detail").textContent = error.message; });

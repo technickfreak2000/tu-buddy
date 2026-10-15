@@ -21,6 +21,15 @@
         <p class="hint">The central TU login is also completed when other services send you there. Use the toolbar to pause all automation.</p>
       </section>
       <section>
+        <h2>TUB-Guest Wi-Fi</h2>
+        <label class="check"><input type="checkbox" id="guest"> Automatically find and sign in to TUB-Guest</label>
+        <label class="check"><input type="checkbox" id="acceptGuestTerms"> Automatically accept TUB-Guest's AGB / acceptable-use terms</label>
+        <label class="check"><input type="checkbox" id="guestNative"> Detect TUB-Guest on a second Wi-Fi adapter (Linux helper)</label>
+        <p class="hint">Uses the TUB account below. Credential entry and terms acceptance are limited to TU's radius-01 HTTPS portal on port 8443. The Linux helper detects the TUB-Guest SSID, so changing wlan2 to wlan3 needs no reconfiguration. Without it, Firefox can detect portals only on its normal network route.</p>
+        <button type="button" id="find-guest" class="secondary">Find TUB-Guest login now</button>
+        <p class="hint">For second-adapter detection, run <code>python3 native/install.py</code> from this extension's source folder once, then restart Firefox. No password or OTP is sent to the helper.</p>
+      </section>
+      <section>
         <h2>Your TUB account <span>Optional</span></h2>
         <p class="hint">Leave both fields empty to use an existing SSO session and enter credentials yourself when needed.</p>
         <label for="username">TUB username</label>
@@ -35,7 +44,7 @@
         <div class="secret"><input id="totp" type="password" autocomplete="off" spellcheck="false" maxlength="4096" placeholder="Base32 secret or otpauth://totp/…"><button type="button" data-reveal="totp" aria-label="Show TOTP secret" aria-pressed="false">Show</button></div>
         <div class="token-test"><button type="button" id="test-totp" class="secondary">Preview current OTP</button><output id="totp-preview" aria-live="polite"></output></div>
       </section>
-      <aside class="privacy"><strong>Keep this Firefox profile private.</strong> Your password and TOTP secret are saved locally, unencrypted, so login can work after restarting Firefox. They are never synced by this extension. Saving both factors together lets anyone with access to this profile sign in as you. Credentials are filled only on the exact TU Shibboleth HTTPS host. No analytics or third-party servers.</aside>
+      <aside class="privacy"><strong>Keep this Firefox profile private.</strong> Your password and TOTP secret are saved locally, unencrypted, so login can work after restarting Firefox. They are never synced by this extension. Saving both factors together lets anyone with access to this profile sign in as you. Credentials are filled only on the exact TU Shibboleth or radius-01 HTTPS login hosts. No analytics or third-party servers.</aside>
       <div class="actions"><button type="submit" id="save">Save settings</button><button type="button" id="forget" class="danger">Delete saved settings &amp; credentials</button></div>
       <p id="status" role="status" aria-live="polite"></p>
     </form>

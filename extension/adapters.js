@@ -1,6 +1,8 @@
 /* Shared with fixture tests. Runs in Firefox's isolated content-script world. */
 (() => {
   const IDP = "https://shibboleth.tubit.tu-berlin.de";
+  const GUEST = "https://radius-01.tu-berlin.de:8443";
+  const PORTAL = "26d19560-2e58-11e9-98fb-0050568775a3";
   const isVisible = element => Boolean(element && !element.disabled && element.getClientRects().length &&
     getComputedStyle(element).visibility !== "hidden" && getComputedStyle(element).display !== "none");
   const firstVisible = (root, selector) => [...root.querySelectorAll(selector)].find(isVisible);
@@ -11,11 +13,39 @@
     const url = new URL(href);
     if (url.origin === "https://isis.tu-berlin.de") return Boolean(doc.querySelector('a[href*="/login/logout.php"], body.loggedin'));
     if (url.origin === "https://moseskonto.tu-berlin.de") return Boolean(doc.querySelector('.nav-top-user-logout, a[href*="/internal/user/logout"]'));
+    if (url.origin === GUEST) return Boolean(doc.querySelector('#page-success, #ui_success_content_label'));
     return false;
   }
 
   function plan(doc, href) {
     const url = new URL(href);
+    if (url.origin === GUEST && url.pathname.startsWith("/portal/")) {
+      if (authenticated(doc, href)) return null;
+      for (const form of doc.forms) {
+        if (form.querySelector('input[name="portal"]')?.value !== PORTAL) continue;
+        const login = firstVisible(form, '#ui_login_signon_button');
+        // The AUP button can start disabled until its scroll/checkbox requirement is met.
+        const accept = form.querySelector('#ui_aup_accept_button');
+        const button = login || accept;
+        if (!button || !button.getClientRects().length) continue;
+        const action = actionFor(form, button, href);
+        if (action.origin !== GUEST || action.username || action.password || action.hash ||
+            (button.getAttribute("formmethod") || form.method).toLowerCase() !== "post" ||
+            (button.getAttribute("formtarget") || form.target || "_self") !== "_self") continue;
+        const terms = form.querySelector('input[type="checkbox"][id="aupAccepted"]');
+        if (login && form.id === "portalloginForm" && action.pathname === "/portal/LoginSubmit.action") {
+          const username = firstVisible(form, 'input[name="user.username"]');
+          const password = firstVisible(form, 'input[name="user.password"][type="password"]');
+          if (username && password) return {kind: "guest-password", form, button, username, password, terms, action: action.href};
+        }
+        if (accept && form.name === "aupForm" &&
+            ["/portal/AupSubmit.action", "/portal/AupAccept.action", "/portal/Aup.action"].includes(action.pathname)) {
+          return {kind: "guest-terms", form, button, terms, scrollArea: doc.querySelector('.cisco-ise-aup-text'),
+            needsScroll: button.disabled || Boolean(button.closest('.ui-disabled')), action: action.href};
+        }
+      }
+      return null;
+    }
     if (url.origin === "https://isis.tu-berlin.de") {
       if (authenticated(doc, href)) return null;
       const button = firstVisible(doc, '#shibboleth_login #shibbolethbutton');
@@ -61,7 +91,7 @@
   }
 
   function loginError(doc) {
-    const candidates = doc.querySelectorAll('.form-error, .login-error, #login-error, .alert-danger, [role="alert"], .error');
+    const candidates = doc.querySelectorAll('.form-error, .login-error, #login-error, .alert-danger, [role="alert"], .error, .cisco-ise-error-message, .cisco-ise-error, #ui_login_error_message');
     return [...candidates].some(el => isVisible(el) &&
       /invalid|incorrect|failed|failure|ungültig|falsch|fehlgeschlagen|gesperrt|locked|abgelaufen|expired|nicht korrekt/i.test(el.textContent));
   }
@@ -72,7 +102,7 @@
     if (target) {
       try {
         const url = new URL(target, href);
-        if (["https://isis.tu-berlin.de", "https://moseskonto.tu-berlin.de", IDP].includes(url.origin) &&
+        if (["https://isis.tu-berlin.de", "https://moseskonto.tu-berlin.de", IDP, GUEST].includes(url.origin) &&
             /(?:\/logout(?:\.|\/|$)|\/Logout(?:\?|$)|\/profile\/Logout)/i.test(url.pathname)) return true;
       } catch { /* Also check explicit logout UI below. */ }
     }

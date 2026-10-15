@@ -3,3 +3,5 @@ web-ext-artifacts/
 dist/*
 !dist/.gitkeep
 *.log
+__pycache__/
+*.pyc

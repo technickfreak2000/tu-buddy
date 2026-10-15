@@ -1,5 +1,6 @@
 import {test, beforeEach} from "node:test";
 import assert from "node:assert/strict";
+import {DEFAULT_SETTINGS} from "../extension/lib/policy.js";
 
 const local = {}, session = {};
 let listener;
@@ -11,6 +12,8 @@ function area(store) {
 globalThis.browser = {
   storage: {local: area(local), session: area(session)},
   action: {setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {}, setTitle: async () => {}},
+  alarms: {create: () => {}, onAlarm: {addListener: () => {}}},
+  captivePortal: {onStateChanged: {addListener: () => {}}},
   runtime: {getURL: path => `moz-extension://test/${path}`, onMessage: {addListener: fn => { listener = fn; }},
     onInstalled: {addListener: () => {}}, onStartup: {addListener: () => {}}, openOptionsPage: async () => {}}
 };
@@ -19,7 +22,7 @@ const own = {url: "moz-extension://test/options/options.html"};
 const sso = "https://shibboleth.tubit.tu-berlin.de/idp/profile/SAML2/Redirect/SSO?execution=e1s2";
 const idp = {url: sso, tab: {id: 1}, frameId: 0};
 const isis = {url: "https://isis.tu-berlin.de/login/index.php", tab: {id: 1}, frameId: 0};
-const config = {enabled: true, isis: true, moses: true, username: "student", password: "test-only-password", totp: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"};
+const config = {...DEFAULT_SETTINGS, username: "student", password: "test-only-password", totp: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"};
 const send = (message, sender = own) => listener(message, sender);
 beforeEach(() => {
   for (const key of Object.keys(local)) delete local[key];
@@ -106,4 +109,22 @@ test("changing TOTP configuration clears the old counter; ordinary settings save
   assert.equal(session.runtime.lastOtpCounter, 10000);
   await send({type: "save", settings: {...config, totp: `otpauth://totp/TU?secret=${config.totp}&period=60`}});
   assert.equal(session.runtime.lastOtpCounter, -1);
+});
+const guest = {url: "https://radius-01.tu-berlin.de:8443/portal/PortalSetup.action", tab: {id: 3}, frameId: 0};
+test("guest credentials and AGB acceptance use independent checked actions and settings", async () => {
+  const login = "https://radius-01.tu-berlin.de:8443/portal/LoginSubmit.action?from=LOGIN";
+  const aup = "https://radius-01.tu-berlin.de:8443/portal/AupSubmit.action";
+  assert.equal((await send({type: "guest-password", action: login}, guest)).password, config.password);
+  assert.equal((await send({type: "guest-terms", action: aup}, guest)).ok, true);
+  assert.equal(await send({type: "password", action: login}, guest), null);
+  assert.equal(await send({type: "guest-password", action: login}, idp), null);
+  assert.equal(await send({type: "guest-password", action: "https://attacker.test/portal/LoginSubmit.action"}, guest), null);
+  local.settings.acceptGuestTerms = false;
+  assert.equal((await send({type: "guest-terms", action: aup}, guest)).ok, false);
+  local.settings.guest = false;
+  assert.equal((await send({type: "check"}, guest)).active, false);
+});
+test("guest pages cannot invoke native discovery or retrieve OTPs", async () => {
+  assert.equal(await send({type: "discover-guest"}, guest), null);
+  assert.equal(await send({type: "otp", action: guest.url}, guest), null);
 });

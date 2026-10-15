@@ -1,8 +1,8 @@
 # TU Berlin Auto Login for Firefox
 
-Automatically clicks the normal TU sign-in controls on **ISIS** and **Moses**. When TU's shared Shibboleth login requires authentication, it can submit a locally saved TUB username, password and fresh TOTP code. Other services such as tuPORT can benefit when they redirect to the same Shibboleth host; their own login buttons are not automated.
+Automatically clicks the normal TU sign-in controls on **ISIS**, **Moses** and **TUB-Guest Wi-Fi**. When TU's shared Shibboleth login requires authentication, it can submit a locally saved TUB username, password and fresh TOTP code. Other services such as tuPORT can benefit when they redirect to the same Shibboleth host; their own login buttons are not automated. TUB-Guest can use the same account and automatically accept its AGB / acceptable-use policy.
 
-TU controls session expiration. This extension **signs you back in while browsing** rather than making sessions permanent. It does not poll services, keep idle tabs alive, rewrite cookies or change server security settings. Background tabs wait until you open them. No account is required to build the extension.
+TU controls session expiration. This extension **signs you back in while browsing** rather than making sessions permanent. It does not keep website sessions alive, rewrite cookies or change server security settings. Background tabs wait until you open them. No account is required to build the extension.
 
 ## Try it in Firefox
 
@@ -11,12 +11,32 @@ Requires desktop **Firefox 142 or newer**.
 1. Open `about:debugging#/runtime/this-firefox` in Firefox.
 2. Click **Load Temporary Add-on…** and select [`extension/manifest.json`](extension/manifest.json).
 3. The settings tab opens. Enable the services you want.
-4. For unattended login, enter your **TUB username and password**, and optionally your **TOTP setup secret**. Click **Save settings**.
+4. For unattended login, enter your **TUB username and password**, and optionally your **TOTP setup secret**. Review the TUB-Guest and automatic AGB settings, then click **Save settings**.
 5. Visit [ISIS](https://isis.tu-berlin.de/) or [Moses](https://moseskonto.tu-berlin.de/moses/index.html). Existing TU tabs may need a reload. Pin the extension to your toolbar to access Pause, Resume and Settings.
 
 Leave credentials empty to automatically follow the normal sign-in flow and reuse an existing SSO session. If TU requires authentication again, enter it yourself or use Firefox's password manager. This mode cannot guarantee unattended login.
 
 **Temporary add-ons are removed when Firefox closes.** For use across browser restarts, build the ZIP and submit it to Mozilla's [Developer Hub](https://addons.mozilla.org/developers/) as an **unlisted / self-distributed** extension. Install the signed XPI Mozilla provides using `about:addons` → gear → **Install Add-on From File…**. Regular Firefox requires Mozilla signing; the ZIP in `dist/` is a submission package, not an installable signed release. See [Mozilla's signing and distribution guide](https://extensionworkshop.com/documentation/publish/signing-and-distribution-overview/).
+
+## TUB-Guest and a second Wi-Fi adapter
+
+The extension recognizes TU's Cisco portal at **`https://radius-01.tu-berlin.de:8443/portal/`**, portal ID `26d19560-2e58-11e9-98fb-0050568775a3`. The login form and AGB controls are restricted to that origin and portal ID. The saved TUB credentials are used only in its verified `LoginSubmit.action` form; the Accept button handles the guest network's terms. Turn **Automatically accept TUB-Guest's AGB** off if you prefer to accept each time. This setting does not accept general Shibboleth data-release consent, contracts or unrelated website terms.
+
+With one default network route, Firefox's captive-portal API detects a locked network and the extension opens its normal detection page. No credentials are placed on the HTTP detection page. Autofill starts only after reaching TU's exact HTTPS portal, with normal certificate verification. Use **Find TUB-Guest login** in the toolbar to check manually.
+
+**For a second adapter (e.g. wlan3 while wlan0 still provides internet), install the optional Linux helper:**
+
+```sh
+python3 native/install.py
+```
+
+Restart Firefox and leave **Detect TUB-Guest on a second Wi-Fi adapter** enabled. The helper requires Python 3, NetworkManager's `nmcli` and `curl`. It reads the active Wi-Fi SSID, identifies profiles by their UUID (duplicate profile names are supported), and binds a credential-free HTTP probe to the actual **TUB-Guest** adapter. It passes only the fresh, verified TU portal URL to Firefox. Adapter names can change from `wlan2` to `wlan3` without configuration. A reconnect is detected at startup or within approximately one minute while Firefox is running. Already checked connections are not probed repeatedly; the toolbar button explicitly retries. Opening a portal tab does not by itself prove that network login succeeded.
+
+The helper never receives passwords or OTPs, changes routes, switches networks, installs a service or keeps its own background process running. Portal-session URLs are not written to persistent extension storage or logs. Browser login still needs a route to the HTTPS portal; in the inspected dual-adapter setup it was reachable through the normal route. Firefox's own network detection can miss a secondary adapter, which is why this helper is needed.
+
+The installer registers only this extension's stable ID and copies the helper under `~/.local/share/tu-buddy/`, with its Firefox manifest at `~/.mozilla/native-messaging-hosts/de.tu_berlin.tu_buddy.json`. No root privileges are required. This path targets regular Linux Firefox; sandboxed Snap/Flatpak builds may require their own native-messaging integration. Remove it with `python3 native/install.py --uninstall`. For inspection or packaging, `--prefix /tmp/test-home` installs into an alternate home directory.
+
+Do not bookmark or hardcode a captured `sessionId`/`token` URL: it belongs to a particular Wi-Fi session. The helper discovers a fresh redirect after reconnection. The nonsecret portal ID is the only portal identifier included in source.
 
 ## TOTP setup
 
@@ -24,7 +44,7 @@ Use the Base32 secret used to set up your authenticator, or the full `otpauth://
 
 The default is HMAC-SHA1, six digits, 30 seconds. An `otpauth` URI can specify SHA256/SHA512, eight digits and a different period. **Preview current OTP** lets you compare with your authenticator without contacting TU. Your computer clock must be correct. The extension waits for a new code when fewer than four seconds remain and never submits the same time step twice in a browser session.
 
-TU explains its procedure and where the setup QR originates in its [TOTP instructions](https://www.tu.berlin/campusmanagement/it-support/zwei-faktor-authentifizierung-tan-verwaltung-totp-token). TAN lists, hardware tokens, push confirmation and CAPTCHA remain manual. Unknown login forms and consent screens are left for you to complete.
+TU explains its procedure and where the setup QR originates in its [TOTP instructions](https://www.tu.berlin/campusmanagement/it-support/zwei-faktor-authentifizierung-tan-verwaltung-totp-token). TAN lists, hardware tokens, push confirmation and CAPTCHA remain manual. Unknown login forms and general consent screens are left for you to complete; TUB-Guest's AGB is handled by its separate setting.
 
 ## Controls and failures
 
@@ -39,8 +59,9 @@ TU explains its procedure and where the setup QR originates in its [TOTP instruc
 Unattended login after restarting Firefox requires recoverable credentials. **The password and TOTP seed are stored unencrypted in this extension's `browser.storage.local` in your Firefox profile.** They are not protected by Firefox's Primary Password. Saving both factors in one profile reduces their separation: someone who can read or use the profile can use both. Use only a private, trusted profile; full-disk encryption protects it when your device is off. You can choose SSO-only mode instead.
 
 - No analytics, remote code, third-party requests, telemetry, external backend or `storage.sync`.
-- Credentials are filled only in recognized POST login forms on **`https://shibboleth.tubit.tu-berlin.de/idp/profile/...`**, with checked form and submit-button destinations. The TOTP seed stays in the background context; only a generated code reaches a page.
-- Content scripts run in the top frame on the exact ISIS, Moses and Shibboleth hosts. No wildcard access to other TU subdomains, cookie access, browsing history or web request interception.
+- Credentials are filled only in recognized POST login forms on **`https://shibboleth.tubit.tu-berlin.de/idp/profile/...`** and the pinned **`https://radius-01.tu-berlin.de:8443/portal/LoginSubmit.action`**, with checked form and submit-button destinations. The TOTP seed stays in the background context; only a generated code reaches a Shibboleth page.
+- Content scripts run in the top frame on the exact ISIS, Moses, Shibboleth and radius-01 hosts. No wildcard access to other TU subdomains, cookie access, browsing history or web request interception.
+- `captivePortal` checks Firefox's network-login state, `alarms` schedules guest-network checks, and `nativeMessaging` communicates with the optional read-only Linux helper. The helper can only perform fixed portal discovery, never arbitrary commands or login submissions.
 - Settings and credential-management messages require an exact extension-owned settings or popup URL. Websites cannot invoke them.
 - Attempt metadata is kept in `storage.session`; credentials, preferences and pause reason are kept locally. No credentials are written to logs or shipped in the package.
 - The manifest declares `authenticationInfo` because optional saved credentials are submitted to TU's login service. This extension has no developer-operated data collection service. See [PRIVACY.md](PRIVACY.md).
@@ -57,12 +78,12 @@ npm run build
 npm start
 ```
 
-`npm start` launches an isolated temporary Firefox profile; change the Firefox binary argument in `package.json` if it is installed elsewhere. The build writes `dist/tu-berlin-auto-login-1.0.0.zip` and includes only `extension/`. Runtime code has no dependencies, no bundler and no network-loaded libraries.
+`npm start` launches an isolated temporary Firefox profile; change the Firefox binary argument in `package.json` if it is installed elsewhere. The build writes `dist/tu-berlin-auto-login-1.1.0.zip` and includes only `extension/`. Install the optional native helper separately from the repository. Runtime JavaScript has no dependencies, no bundler and no network-loaded libraries.
 
-Tests cover RFC 6238 TOTP vectors, URI validation, exact-origin and message authorization, retry limits, pause persistence, login-button selection, named submitters, dynamic Moses navigation, OTP waits, destination changes and representative error/consent/TAN pages.
+Tests cover RFC 6238 TOTP vectors, URI validation, exact-origin and message authorization, retry limits, pause persistence, login-button selection, named submitters, dynamic Moses navigation, OTP waits, destination changes, guest credential/AGB handling, portal discovery, native message framing, changing adapter names and helper installation/removal. Native tests use Python's standard library.
 
 ### Verification limits
 
-The public ISIS login form, its redirect to Shibboleth, the TU username/password form and Moses's current JavaScript login control were inspected on **2026-10-15**. Reduced fixtures preserve their relevant controls. **No real TUB credentials have been used and a live authenticated OTP page has not been inspected**; OTP tests use a representative fixture. If TU uses different OTP markup, the adapter needs updating. Other TU services work only when their flow reaches the supported Shibboleth form. TU outages, expired SAML flows and mandatory interaction can still interrupt login.
+The public ISIS login form, its redirect to Shibboleth, the TU username/password form and Moses's current JavaScript login control were inspected on **2026-10-15**. TUB-Guest's actual login form and Cisco JavaScript were also inspected through `wlan3`; a live device-specific portal redirect was obtained. Reduced fixtures preserve relevant controls without session tokens. **No real TUB credentials have been used, and live authenticated OTP and AGB pages have not been inspected**; those fixtures use representative forms, with guest AGB control names verified in the portal's JavaScript. If TU changes markup, the adapter may need updating. Other TU services work only when their flow reaches the supported Shibboleth form. TU outages, expired SAML flows and mandatory interaction can still interrupt login.
 
 The extension deliberately does not automatically retry a “Stale Request” page or guess new identity-provider domains. Start again from the service's home page, check the toolbar state and Resume if needed.

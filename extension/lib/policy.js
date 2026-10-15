@@ -1,6 +1,9 @@
 export const IDP_ORIGIN = "https://shibboleth.tubit.tu-berlin.de";
 export const SERVICE_ORIGINS = ["https://isis.tu-berlin.de", "https://moseskonto.tu-berlin.de"];
-export const DEFAULT_SETTINGS = Object.freeze({enabled: true, isis: true, moses: true, username: "", password: "", totp: ""});
+export const GUEST_ORIGIN = "https://radius-01.tu-berlin.de:8443";
+export const GUEST_PORTAL = "26d19560-2e58-11e9-98fb-0050568775a3";
+export const DEFAULT_SETTINGS = Object.freeze({enabled: true, isis: true, moses: true,
+  guest: true, acceptGuestTerms: true, guestNative: true, username: "", password: "", totp: ""});
 export const WINDOW_MS = 10 * 60 * 1000;
 
 export function classifyUrl(value) {
@@ -9,9 +12,20 @@ export function classifyUrl(value) {
     if (url.username || url.password) return null;
     if (url.origin === SERVICE_ORIGINS[0]) return "isis";
     if (url.origin === SERVICE_ORIGINS[1] && /^\/moses(?:\/|$)/.test(url.pathname)) return "moses";
+    if (url.origin === GUEST_ORIGIN && url.pathname.startsWith("/portal/")) return "guest";
     if (url.origin === IDP_ORIGIN && /^\/idp\/profile\/(?:SAML2|Shibboleth|cas|oidc)\//i.test(url.pathname)) return "idp";
   } catch { /* Invalid URLs never qualify. */ }
   return null;
+}
+
+export function safeGuestAction(action, page, kind) {
+  try {
+    const target = new URL(action, page);
+    const paths = kind === "guest-password" ? ["/portal/LoginSubmit.action"] :
+      kind === "guest-terms" ? ["/portal/AupSubmit.action", "/portal/AupAccept.action", "/portal/Aup.action"] : [];
+    return classifyUrl(page) === "guest" && target.origin === GUEST_ORIGIN &&
+      !target.username && !target.password && !target.hash && paths.includes(target.pathname);
+  } catch { return false; }
 }
 
 export function trustedSender(sender) {

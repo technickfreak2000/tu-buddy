@@ -37,6 +37,14 @@ $("forget").addEventListener("click", async () => {
     status("Deleted saved settings and credentials. Automatic login is paused.");
   } catch (error) { status(error.message, true); }
 });
+$("find-guest").addEventListener("click", async () => {
+  $("find-guest").disabled = true;
+  try {
+    const result = await browser.runtime.sendMessage({type: "discover-guest"});
+    status(result?.reason || "Guest-network check completed.", !result?.ok);
+  } catch { status("Could not check the guest network.", true); }
+  finally { $("find-guest").disabled = false; }
+});
 $("test-totp").addEventListener("click", async () => {
   clearTimeout(previewTimer);
   try {
