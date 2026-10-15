@@ -1,11 +1,13 @@
 import {DEFAULT_SETTINGS, classifyUrl, trustedSender, safeFormAction, safeGuestAction, freshState, reserveAttempt} from "./lib/policy.js";
 import {parseTotp, generateTotp} from "./lib/totp.js";
 import {createGuestDiscovery, GUEST_ALARM} from "./lib/guest-discovery.js";
+import {createLoginSetup} from "./lib/login-setup.js";
 
 const SETTINGS_KEY = "settings";
 const STATE_KEY = "runtime";
 let queue = Promise.resolve();
 const discoverGuest = createGuestDiscovery(browser, settings, async () => Boolean((await state()).paused));
+const loginSetup = createLoginSetup(browser);
 
 async function settings() {
   return {...DEFAULT_SETTINGS, ...(await browser.storage.local.get(SETTINGS_KEY))[SETTINGS_KEY]};
@@ -30,7 +32,7 @@ function extensionPage(sender) {
   return !sender.tab || sender.url?.startsWith(browser.runtime.getURL(""));
 }
 function isOwnPage(sender) {
-  return extensionPage(sender) && ["options/options.html", "popup/popup.html"].some(path => sender.url === browser.runtime.getURL(path));
+  return extensionPage(sender) && (["options/options.html", "popup/popup.html"].some(path => sender.url === browser.runtime.getURL(path)) || loginSetup.isPage(sender));
 }
 async function handle(message, sender) {
   if (!message || typeof message.type !== "string") return null;
@@ -38,6 +40,26 @@ async function handle(message, sender) {
   const trusted = trustedSender(sender);
   if (!own && !trusted) return null;
   const [config, runtime] = await Promise.all([settings(), state()]);
+  if (own && loginSetup.isPage(sender)) {
+    if (message.type === "setup-info") {
+      return {...await loginSetup.info(sender), username: config.username, hasTotp: Boolean(config.totp)};
+    }
+    if (message.type === "setup-skip") return {ok: true, ...await loginSetup.finish(sender, true)};
+    if (message.type === "setup-save") {
+      const account = message.account;
+      if (!account || ["username", "password", "totp"].some(key => typeof account[key] !== "string" || account[key].length > 4096) ||
+          !account.username.trim() || !account.password) return {ok: false, reason: "Enter your TUB username and password."};
+      const totp = account.totp.trim() || config.totp;
+      if (totp) {
+        try { parseTotp(totp); }
+        catch (error) { return {ok: false, reason: error.message}; }
+      }
+      await browser.storage.local.set({settings: {...config, enabled: true,
+        username: account.username.trim(), password: account.password, totp}});
+      await persist({...runtime, paused: "", attempts: [], lastOtpCounter: totp === config.totp ? runtime.lastOtpCounter : -1});
+      return {ok: true, ...await loginSetup.finish(sender)};
+    }
+  }
   if (message.type === "status" && own) {
     return {enabled: config.enabled, paused: runtime.paused, hasPassword: Boolean(config.username && config.password),
       hasTotp: Boolean(config.totp), isis: config.isis, moses: config.moses, guest: config.guest};
@@ -77,8 +99,16 @@ async function handle(message, sender) {
   if (!trusted) return null;
   const service = classifyUrl(sender.url);
   const active = config.enabled && !runtime.paused && (service === "idp" || config[service]);
-  if (message.type === "check") return {active, acceptGuestTerms: config.acceptGuestTerms};
+  if (message.type === "check") return {active, acceptGuestTerms: config.acceptGuestTerms,
+    needsSetup: !(config.username && config.password) && !(await loginSetup.bypassed(sender.tab.id))};
   if (!active) return {ok: false, reason: runtime.paused || "Automatic login is disabled."};
+  if (message.type === "open-setup") {
+    const valid = service === "idp" && ["password", "otp"].includes(message.step) && safeFormAction(message.action, sender.url) ||
+      service === "guest" && message.step === "guest-password" && safeGuestAction(message.action, sender.url, message.step);
+    if (!valid) return null;
+    if (config.username && config.password) return {ok: true, alreadyConfigured: true};
+    return loginSetup.open(sender);
+  }
   if (message.type === "success" && service !== "idp") {
     let changed = false;
     for (const attempt of runtime.attempts) {
@@ -130,6 +160,9 @@ browser.runtime.onMessage.addListener((message, sender) => {
   const result = queue.then(() => handle(message, sender));
   queue = result.catch(() => {});
   return result.catch(() => ({ok: false, reason: "Could not complete automatic login. Open settings to check your configuration."}));
+});
+browser.tabs.onRemoved.addListener(tabId => {
+  queue = queue.then(() => loginSetup.closed(tabId)).catch(() => {});
 });
 browser.runtime.onInstalled.addListener(async details => {
   await badge();

@@ -14,7 +14,9 @@ Requires desktop **Firefox 142 or newer**.
 4. For unattended login, enter your **TUB username and password**, and optionally your **TOTP setup secret**. Review the TUB-Guest and automatic AGB settings, then click **Save settings**.
 5. Visit [ISIS](https://isis.tu-berlin.de/) or [Moses](https://moseskonto.tu-berlin.de/moses/index.html). Existing TU tabs may need a reload. Pin the extension to your toolbar to access Pause, Resume and Settings.
 
-Leave credentials empty to automatically follow the normal sign-in flow and reuse an existing SSO session. If TU requires authentication again, enter it yourself or use Firefox's password manager. This mode cannot guarantee unattended login.
+When a supported TU sign-in form appears and no username/password is saved, TU Buddy opens its own **Set up automatic TU login** page. Enter your username, password and optional **TOTP setup secret** (Base32 or an `otpauth://totp/...` URI). **Save & continue** stores the account locally, brings the original TU tab back and continues its login. The original form stays open with its cookies and hidden fields while you configure the account. No secret is placed in a page URL or entered into TU's webpage; only generated codes are used there.
+
+**Use TU login without saving**, or closing the setup tab, returns you to manual login and suppresses setup prompts for that original tab until it closes or Firefox restarts. Other tabs can still offer setup. Existing SSO sessions can be reused without saving an account. Pausing the extension stops setup prompts too. The dedicated setup page clearly identifies itself as part of this independent extension; it is not an official TU page.
 
 **Temporary add-ons are removed when Firefox closes.** For use across browser restarts, build the ZIP and submit it to Mozilla's [Developer Hub](https://addons.mozilla.org/developers/) as an **unlisted / self-distributed** extension. Install the signed XPI Mozilla provides using `about:addons` → gear → **Install Add-on From File…**. Regular Firefox requires Mozilla signing; the ZIP in `dist/` is a submission package, not an installable signed release. See [Mozilla's signing and distribution guide](https://extensionworkshop.com/documentation/publish/signing-and-distribution-overview/).
 
@@ -62,7 +64,7 @@ Unattended login after restarting Firefox requires recoverable credentials. **Th
 - Credentials are filled only in recognized POST login forms on **`https://shibboleth.tubit.tu-berlin.de/idp/profile/...`** and the pinned **`https://radius-01.tu-berlin.de:8443/portal/LoginSubmit.action`**, with checked form and submit-button destinations. The TOTP seed stays in the background context; only a generated code reaches a Shibboleth page.
 - Content scripts run in the top frame on the exact ISIS, Moses, Shibboleth and radius-01 hosts. No wildcard access to other TU subdomains, cookie access, browsing history or web request interception.
 - `captivePortal` checks Firefox's network-login state, `alarms` schedules guest-network checks, and `nativeMessaging` communicates with the optional read-only Linux helper. The helper can only perform fixed portal discovery, never arbitrary commands or login submissions.
-- Settings and credential-management messages require an exact extension-owned settings or popup URL. Websites cannot invoke them.
+- Settings and credential-management messages require an exact extension-owned settings, setup or popup URL. Websites cannot invoke them. Setup return requests are bound to their original and setup tab IDs; they cannot supply an arbitrary return URL. Setup pages cannot be embedded in website frames.
 - Attempt metadata is kept in `storage.session`; credentials, preferences and pause reason are kept locally. No credentials are written to logs or shipped in the package.
 - The manifest declares `authenticationInfo` because optional saved credentials are submitted to TU's login service. This extension has no developer-operated data collection service. See [PRIVACY.md](PRIVACY.md).
 
@@ -78,12 +80,14 @@ npm run build
 npm start
 ```
 
-`npm start` launches an isolated temporary Firefox profile; change the Firefox binary argument in `package.json` if it is installed elsewhere. The build writes `dist/tu-berlin-auto-login-1.1.0.zip` and includes only `extension/`. Install the optional native helper separately from the repository. Runtime JavaScript has no dependencies, no bundler and no network-loaded libraries.
+`npm start` launches an isolated temporary Firefox profile; change the Firefox binary argument in `package.json` if it is installed elsewhere. The build writes `dist/tu-berlin-auto-login-1.2.0.zip` and includes only `extension/`. Install the optional native helper separately from the repository. Runtime JavaScript has no dependencies, no bundler and no network-loaded libraries.
 
 Tests cover RFC 6238 TOTP vectors, URI validation, exact-origin and message authorization, retry limits, pause persistence, login-button selection, named submitters, dynamic Moses navigation, OTP waits, destination changes, guest credential/AGB handling, portal discovery, native message framing, changing adapter names and helper installation/removal. Native tests use Python's standard library.
 
 ### Verification limits
 
 The public ISIS login form, its redirect to Shibboleth, the TU username/password form and Moses's current JavaScript login control were inspected on **2026-10-15**. TUB-Guest's actual login form and Cisco JavaScript were also inspected through `wlan3`; a live device-specific portal redirect was obtained. Reduced fixtures preserve relevant controls without session tokens. **No real TUB credentials have been used, and live authenticated OTP and AGB pages have not been inspected**; those fixtures use representative forms, with guest AGB control names verified in the portal's JavaScript. If TU changes markup, the adapter may need updating. Other TU services work only when their flow reaches the supported Shibboleth form. TU outages, expired SAML flows and mandatory interaction can still interrupt login.
+
+A fresh Firefox profile was used to verify that the public ISIS-to-Shibboleth flow opens the extension's setup page and that skipping restores the original login tab. Local account saving, OTP preview and clearing sensitive fields were also verified in Firefox, using a test account after closing all TU login tabs. This checks setup without sending test credentials to TU.
 
 The extension deliberately does not automatically retry a “Stale Request” page or guess new identity-provider domains. Start again from the service's home page, check the toolbar state and Resume if needed.

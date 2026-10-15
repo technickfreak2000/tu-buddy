@@ -1,0 +1,13 @@
+main { width: min(100% - 40px, 620px); margin-top: 64px; }
+h1 { font-size: 27px; }
+.intro { font-size: 16px; margin-bottom: 20px; }
+.destination { display: inline-block; color: var(--muted); font-size: 12px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; margin: 0 0 24px; }
+.destination[hidden] { display: none; }
+section > label:first-child { margin-top: 0; }
+.optional { font-size: 11px; font-weight: 400; color: var(--muted); margin-left: 6px; }
+.hint { margin-top: 12px; }
+.actions { gap: 12px; }
+#done a { margin-right: 20px; }
+a { color: var(--accent); }
+footer { margin-top: 22px; }
+@media (max-width: 520px) { main { margin-top: 28px; } h1 { font-size: 23px; } .actions > button { width: 100%; } }

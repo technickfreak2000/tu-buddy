@@ -4,6 +4,7 @@
   let working = false, stopped = false, timer, retryTimer, notice, retryAt = 0;
   let attempted = new WeakSet();
   let reportedSuccess = false;
+  let setupPending = false;
   const preparedTerms = new WeakSet();
   const send = message => browser.runtime.sendMessage(message);
 
@@ -25,7 +26,7 @@
     input.dispatchEvent(new Event("change", {bubbles: true}));
   }
   async function run() {
-    if (working || stopped || document.hidden) return;
+    if (working || stopped || setupPending || document.hidden) return;
     if (Date.now() < retryAt) {
       clearTimeout(retryTimer);
       retryTimer = setTimeout(run, retryAt - Date.now() + 25);
@@ -41,6 +42,14 @@
       }
       const current = plan(document, location.href);
       if (!current || attempted.has(current.form || current.button)) return;
+      if (status.needsSetup && ["password", "otp", "guest-password"].includes(current.kind)) {
+        const setup = await send({type: "open-setup", step: current.kind, action: current.action});
+        if (setup?.opened) { setupPending = true; return; }
+        if (!setup?.alreadyConfigured && !setup?.skipped) {
+          show("Open the extension settings to set up automatic login.");
+          return;
+        }
+      }
       if (current.kind === "guest-terms" || current.terms) {
         if (!status.acceptGuestTerms) {
           show("Accept the guest network AGB here, or enable automatic acceptance in settings.");
@@ -103,15 +112,20 @@
     send({type: "pause", reason: "logout"}).catch(() => {}).finally(() => control.click());
   }, true);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) schedule(); });
+  browser.runtime.onMessage.addListener(message => {
+    if (message?.type === "login-setup-finished") { setupPending = false; schedule(); }
+  });
   document.addEventListener("input", event => {
     // Let a person take over a login form without overwriting what they type.
     if (event.isTrusted && ["shibboleth.tubit.tu-berlin.de", "radius-01.tu-berlin.de"].includes(location.hostname)) stopped = true;
   }, true);
   browser.storage.onChanged.addListener((changes, area) => {
+    if (area === "session" && changes.loginSetupBypass) { setupPending = false; schedule(); }
     if ((area === "local" && changes.settings) || (area === "session" && changes.runtime)) {
       const oldState = changes.runtime?.oldValue, newState = changes.runtime?.newValue;
       if (changes.settings || (oldState?.paused && !newState?.paused)) {
         stopped = false;
+        setupPending = false;
         attempted = new WeakSet();
         retryAt = 0;
         notice?.remove(); notice = null;

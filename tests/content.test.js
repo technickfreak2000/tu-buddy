@@ -10,15 +10,16 @@ const fixture = await readFile(new URL("fixtures/password.html", import.meta.url
 const idp = "https://shibboleth.tubit.tu-berlin.de/idp/profile/SAML2/Redirect/SSO?execution=e1s2";
 
 function setup(html = fixture, responder = () => ({ok: true, username: "student", password: "test-only-password"}),
-  {url = idp, acceptGuestTerms = true} = {}) {
+  {url = idp, acceptGuestTerms = true, needsSetup = false} = {}) {
   const dom = new JSDOM(html, {url, runScripts: "outside-only", pretendToBeVisual: true});
   const messages = [], submits = [];
-  let onChange;
+  let onChange, onMessage;
   dom.window.HTMLElement.prototype.getClientRects = function () { return this.hidden ? [] : [{}]; };
   dom.window.browser = {
-    runtime: {sendMessage: async message => {
+    runtime: {onMessage: {addListener: fn => { onMessage = fn; }}, sendMessage: async message => {
       messages.push(message);
-      return message.type === "check" ? {active: true, acceptGuestTerms} : responder(message);
+      return message.type === "check" ? {active: true, acceptGuestTerms,
+        needsSetup: typeof needsSetup === "function" ? needsSetup() : needsSetup} : responder(message);
     }},
     storage: {onChanged: {addListener: fn => { onChange = fn; }}}
   };
@@ -28,7 +29,9 @@ function setup(html = fixture, responder = () => ({ok: true, username: "student"
   });
   dom.window.eval(adapters);
   dom.window.eval(content);
-  return {dom, doc: dom.window.document, messages, submits, resume: () => onChange({runtime: {oldValue: {paused: "test"}, newValue: {paused: ""}}}, "session")};
+  return {dom, doc: dom.window.document, messages, submits,
+    setupFinished: () => onMessage({type: "login-setup-finished"}),
+    resume: () => onChange({runtime: {oldValue: {paused: "test"}, newValue: {paused: ""}}}, "session")};
 }
 async function until(check) {
   for (let i = 0; i < 30; i++) { if (check()) return; await delay(50); }
@@ -127,5 +130,41 @@ test("guest AGB scrolling uses the portal's unlock handler before reserving acce
   try {
     await until(() => p.submits.length === 1);
     assert.equal(p.messages.filter(m => m.type === "guest-terms").length, 1);
+  } finally { p.dom.window.close(); }
+});
+test("first-time TU login opens setup before requesting or submitting any credentials", async () => {
+  const p = setup(fixture, () => ({ok: true, opened: true}), {needsSetup: true});
+  try {
+    await until(() => p.messages.some(m => m.type === "open-setup"));
+    assert.equal(p.messages.find(m => m.type === "open-setup").step, "password");
+    assert.equal(p.messages.some(m => m.type === "password"), false);
+    assert.equal(p.submits.length, 0);
+    p.doc.body.append(p.doc.createElement("div"));
+    await delay(350);
+    assert.equal(p.messages.filter(m => m.type === "open-setup").length, 1);
+  } finally { p.dom.window.close(); }
+});
+test("guest login opens the same extension setup flow when the account is missing", async () => {
+  const html = await readFile(new URL("fixtures/guest-login.html", import.meta.url), "utf8");
+  const p = setup(html, () => ({ok: true, opened: true}), {url: guestUrl, needsSetup: true});
+  try {
+    await until(() => p.messages.some(m => m.type === "open-setup"));
+    assert.equal(p.messages.find(m => m.type === "open-setup").step, "guest-password");
+    assert.equal(p.submits.length, 0);
+  } finally { p.dom.window.close(); }
+});
+test("a direct completion message wakes the original tab without session-storage events", async () => {
+  let needsSetup = true;
+  const p = setup(fixture, message => {
+    if (message.type === "open-setup") return {ok: true, opened: true};
+    return {ok: false, reason: "Enter your credentials manually."};
+  }, {needsSetup: () => needsSetup});
+  try {
+    await until(() => p.messages.some(m => m.type === "open-setup"));
+    needsSetup = false;
+    p.setupFinished();
+    await until(() => p.messages.some(m => m.type === "password"));
+    assert.equal(p.messages.filter(m => m.type === "open-setup").length, 1);
+    assert.equal(p.submits.length, 0);
   } finally { p.dom.window.close(); }
 });

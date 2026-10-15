@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Set up TU login · TU Buddy</title>
+  <link rel="icon" href="../icons/tu.svg">
+  <link rel="stylesheet" href="../options/options.css">
+  <link rel="stylesheet" href="login.css">
+  <script type="module" src="login.js"></script>
+</head>
+<body>
+  <main>
+    <header><img src="../icons/tu.svg" width="52" height="52" alt=""><div><p class="eyebrow">TU BUDDY · EXTENSION SETUP</p><h1>Set up automatic TU login</h1></div></header>
+    <p class="intro" id="intro">Save your TUB account here once. TU Buddy will enter your credentials and generate one-time codes when you sign in.</p>
+    <p class="destination" id="destination" hidden></p>
+    <form id="login-setup">
+      <section>
+        <label for="username">TUB username</label>
+        <input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="4096" placeholder="Your TUB account name" required autofocus>
+        <label for="password">Password</label>
+        <div class="secret"><input id="password" name="password" type="password" autocomplete="new-password" maxlength="4096" required><button type="button" data-reveal="password" aria-label="Show password" aria-pressed="false">Show</button></div>
+        <label for="totp">TOTP setup secret <span class="optional">Optional</span></label>
+        <div class="secret"><input id="totp" name="totp" type="password" autocomplete="off" spellcheck="false" maxlength="4096" placeholder="Base32 secret or otpauth://totp/…"><button type="button" data-reveal="totp" aria-label="Show TOTP secret" aria-pressed="false">Show</button></div>
+        <p class="hint" id="totp-help">Use the secret from your authenticator setup or the full <code>otpauth://totp/…</code> URI from its QR code. The six-digit code changes; the setup secret generates future codes. Leave empty to enter OTPs manually.</p>
+        <div class="token-test"><button type="button" id="preview" class="secondary">Check current OTP</button><output id="code" aria-live="polite"></output></div>
+      </section>
+      <aside class="privacy"><strong>This is TU Buddy's setup page, provided by your extension.</strong> Your password and TOTP secret are stored locally, unencrypted, in this Firefox profile. Saving both here lets anyone with access to the profile sign in as you. The setup secret generates codes locally and is never entered into TU's webpage.</aside>
+      <div class="actions"><button type="submit" id="save">Save &amp; continue</button><button type="button" id="skip" class="secondary">Use TU login without saving</button></div>
+    </form>
+    <p id="status" role="status" aria-live="polite"></p>
+    <section id="done" hidden><h2>Account saved</h2><p>Your original login tab is no longer available. Your account is ready for your next TU login.</p><a href="https://isis.tu-berlin.de/">Open ISIS</a><a href="../options/options.html">Open settings</a></section>
+    <footer>Independent extension, not affiliated with TU Berlin. You can change or delete saved credentials in <a href="../options/options.html">extension settings</a>.</footer>
+  </main>
+</body>
+</html>

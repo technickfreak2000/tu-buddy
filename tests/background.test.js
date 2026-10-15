@@ -4,6 +4,9 @@ import {DEFAULT_SETTINGS} from "../extension/lib/policy.js";
 
 const local = {}, session = {};
 let listener;
+let tabRemoved;
+const tabs = new Map();
+let nextTabId = 100;
 function area(store) {
   return {get: async key => ({[key]: structuredClone(store[key])}),
     set: async values => Object.assign(store, structuredClone(values)),
@@ -14,6 +17,12 @@ globalThis.browser = {
   action: {setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {}, setTitle: async () => {}},
   alarms: {create: () => {}, onAlarm: {addListener: () => {}}},
   captivePortal: {onStateChanged: {addListener: () => {}}},
+  tabs: {
+    onRemoved: {addListener: fn => { tabRemoved = fn; }},
+    get: async id => { if (!tabs.has(id)) throw new Error("No such tab"); return tabs.get(id); },
+    create: async properties => { const tab = {...properties, id: nextTabId++}; tabs.set(tab.id, tab); return tab; },
+    update: async (id, properties) => { if (!tabs.has(id)) throw new Error("No such tab"); Object.assign(tabs.get(id), properties); return tabs.get(id); }
+  },
   runtime: {getURL: path => `moz-extension://test/${path}`, onMessage: {addListener: fn => { listener = fn; }},
     onInstalled: {addListener: () => {}}, onStartup: {addListener: () => {}}, openOptionsPage: async () => {}}
 };
@@ -28,6 +37,9 @@ beforeEach(() => {
   for (const key of Object.keys(local)) delete local[key];
   for (const key of Object.keys(session)) delete session[key];
   local.settings = {...config};
+  tabs.clear();
+  tabs.set(1, {id: 1, url: sso});
+  nextTabId = 100;
 });
 test("only own extension pages can edit settings or resume", async () => {
   for (const sender of [isis, idp, {url: "https://attacker.test/", tab: {id: 1}, frameId: 0}]) {
@@ -127,4 +139,69 @@ test("guest credentials and AGB acceptance use independent checked actions and s
 test("guest pages cannot invoke native discovery or retrieve OTPs", async () => {
   assert.equal(await send({type: "discover-guest"}, guest), null);
   assert.equal(await send({type: "otp", action: guest.url}, guest), null);
+});
+async function openSetup(sender = idp) {
+  local.settings = {...DEFAULT_SETTINGS};
+  tabs.set(sender.tab.id, {id: sender.tab.id, url: sender.url});
+  const action = sender === guest ? "https://radius-01.tu-berlin.de:8443/portal/LoginSubmit.action" : sso;
+  await send({type: "open-setup", step: sender === guest ? "guest-password" : "password", action}, sender);
+  return {url: tabs.get(100).url, tab: {id: 100}};
+}
+test("missing credentials open setup only for checked TU authentication steps", async () => {
+  local.settings = {...DEFAULT_SETTINGS};
+  assert.equal((await send({type: "check"}, idp)).needsSetup, true);
+  for (const message of [{type: "open-setup", step: "password", action: "https://attacker.test/"},
+    {type: "open-setup", step: "start", action: sso}]) assert.equal(await send(message, idp), null);
+  const setup = await openSetup();
+  assert.equal((await send({type: "setup-info"}, setup)).canReturn, true);
+  assert.equal(await send({type: "setup-info"}, idp), null);
+  assert.equal(tabs.size, 2);
+  await send({type: "open-setup", step: "password", action: sso}, idp);
+  assert.equal(tabs.size, 2);
+});
+test("setup saves the TOTP seed locally, preserves preferences and resumes the TU login", async () => {
+  const setup = await openSetup();
+  local.settings.acceptGuestTerms = false;
+  local.settings.guestNative = false;
+  const account = {username: " student ", password: "test-only-password", totp: config.totp};
+  assert.deepEqual(await send({type: "setup-save", account}, setup), {ok: true, returned: true});
+  assert.equal(local.settings.username, "student");
+  assert.equal(local.settings.totp, config.totp);
+  assert.equal(local.settings.acceptGuestTerms, false);
+  assert.equal(local.settings.guestNative, false);
+  assert.equal((await send({type: "check"}, idp)).needsSetup, false);
+  assert.equal(tabs.get(1).active, true);
+  assert.equal(JSON.stringify(session).includes(account.password), false);
+  assert.equal(JSON.stringify(session).includes(account.totp), false);
+});
+test("setup rejects six-digit codes and missing credentials without saving", async () => {
+  const setup = await openSetup();
+  for (const account of [
+    {username: "student", password: "password", totp: "123456"},
+    {username: "", password: "password", totp: ""},
+    {username: "student", password: "", totp: ""}
+  ]) assert.equal((await send({type: "setup-save", account}, setup)).ok, false);
+  assert.equal(local.settings.password, "");
+  assert.equal(tabs.get(1).active, undefined);
+  assert.equal(await send({type: "setup-save", account: {username: "x", password: "x", totp: ""}}, idp), null);
+});
+test("skipping setup keeps the account empty and makes manual TU login available", async () => {
+  const setup = await openSetup(guest);
+  assert.equal((await send({type: "setup-skip"}, setup)).returned, true);
+  assert.equal(local.settings.password, "");
+  assert.equal((await send({type: "check"}, guest)).needsSetup, false);
+  assert.equal((await send({type: "check"}, idp)).needsSetup, true);
+});
+test("configured or paused accounts never open first-time setup", async () => {
+  assert.equal((await send({type: "open-setup", step: "password", action: sso}, idp)).alreadyConfigured, true);
+  local.settings = {...DEFAULT_SETTINGS};
+  local.pauseReason = "Paused";
+  assert.equal((await send({type: "open-setup", step: "password", action: sso}, idp)).ok, false);
+  assert.equal(tabs.size, 1);
+});
+test("closing setup cleans its state and bypasses repeated prompts", async () => {
+  const setup = await openSetup();
+  tabs.delete(setup.tab.id);
+  tabRemoved(setup.tab.id);
+  assert.equal((await send({type: "check"}, idp)).needsSetup, false);
 });
