@@ -8,7 +8,7 @@ import {parseTotp, generateTotp} from "../extension/lib/totp.js";
 const html = await readFile(new URL("../extension/login/login.html", import.meta.url), "utf8");
 const script = (await readFile(new URL("../extension/login/login.js", import.meta.url), "utf8")).replace(/^import[^\n]+\n/, "");
 const seed = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
-function setup(responder = () => ({ok: true, returned: true})) {
+function setup(responder = () => ({ok: true, returned: true}), info = {}) {
   const dom = new JSDOM(html, {url: "moz-extension://test/login/login.html", runScripts: "outside-only"});
   const messages = [], closed = [];
   dom.window.parseTotp = parseTotp;
@@ -16,7 +16,7 @@ function setup(responder = () => ({ok: true, returned: true})) {
   dom.window.browser = {
     runtime: {getURL: path => "moz-extension://test/" + path, sendMessage: async message => {
       messages.push(message);
-      return message.type === "setup-info" ? {username: "", service: "idp", canReturn: true, hasTotp: false} : responder(message);
+      return message.type === "setup-info" ? {username: "", service: "idp", canReturn: true, hasTotp: false, ...info} : responder(message);
     }},
     tabs: {getCurrent: async () => ({id: 100}), remove: async id => closed.push(id)}
   };
@@ -44,6 +44,16 @@ test("dedicated setup submits the TOTP secret and clears secret fields after ret
     assert.equal(p.doc.getElementById("password").value, "");
     assert.equal(p.doc.getElementById("totp").value, "");
     assert.equal(p.dom.window.location.href.includes(seed), false);
+  } finally { p.dom.window.close(); }
+});
+test("rejected accounts explain the pause and prefill only the username", async () => {
+  const p = setup(undefined, {reason: "rejected", username: "student", hasTotp: true});
+  try {
+    await until(() => /paused/.test(p.doc.getElementById("intro").textContent));
+    assert.equal(p.doc.getElementById("username").value, "student");
+    assert.equal(p.doc.getElementById("password").value, "");
+    assert.equal(p.doc.getElementById("totp").value, "");
+    assert.match(p.doc.getElementById("totp-help").textContent, /already saved/);
   } finally { p.dom.window.close(); }
 });
 test("six-digit codes and missing credentials are rejected before storage", async () => {

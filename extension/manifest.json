@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TU Berlin Auto Login",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Automatic TU Berlin login for ISIS, Moses and TUB-Guest Wi-Fi, with optional local password and TOTP autofill.",
   "permissions": ["storage", "captivePortal", "alarms", "nativeMessaging"],
   "host_permissions": [

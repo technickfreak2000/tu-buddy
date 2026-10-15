@@ -5,6 +5,7 @@ import {createLoginSetup} from "./lib/login-setup.js";
 
 const SETTINGS_KEY = "settings";
 const STATE_KEY = "runtime";
+const LEGACY_LOGIN_ERROR = "TU reported a login error. Check the page and your credentials, then use Resume.";
 let queue = Promise.resolve();
 const discoverGuest = createGuestDiscovery(browser, settings, async () => Boolean((await state()).paused));
 const loginSetup = createLoginSetup(browser);
@@ -40,6 +41,12 @@ async function handle(message, sender) {
   const trusted = trustedSender(sender);
   if (!own && !trusted) return null;
   const [config, runtime] = await Promise.all([settings(), state()]);
+  const hasAccount = Boolean(config.username && config.password);
+  // Older versions paused on a page's error text even without submitting an account.
+  if (!hasAccount && runtime.paused === LEGACY_LOGIN_ERROR) {
+    runtime.paused = "";
+    await persist(runtime);
+  }
   if (own && loginSetup.isPage(sender)) {
     if (message.type === "setup-info") {
       return {...await loginSetup.info(sender), username: config.username, hasTotp: Boolean(config.totp)};
@@ -99,12 +106,15 @@ async function handle(message, sender) {
   if (!trusted) return null;
   const service = classifyUrl(sender.url);
   const active = config.enabled && !runtime.paused && (service === "idp" || config[service]);
+  const hasLoginAttempt = runtime.attempts.some(attempt => attempt.tabId === sender.tab.id &&
+    !attempt.settled && ["password", "otp"].includes(attempt.kind));
   if (message.type === "check") return {active, acceptGuestTerms: config.acceptGuestTerms,
-    needsSetup: !(config.username && config.password) && !(await loginSetup.bypassed(sender.tab.id))};
+    hasLoginAttempt, needsSetup: !hasAccount && !(await loginSetup.bypassed(sender.tab.id))};
   if (!active) return {ok: false, reason: runtime.paused || "Automatic login is disabled."};
+  const validAuthStep = service === "idp" && ["password", "otp"].includes(message.step) && safeFormAction(message.action, sender.url) ||
+    service === "guest" && message.step === "guest-password" && safeGuestAction(message.action, sender.url, message.step);
   if (message.type === "open-setup") {
-    const valid = service === "idp" && ["password", "otp"].includes(message.step) && safeFormAction(message.action, sender.url) ||
-      service === "guest" && message.step === "guest-password" && safeGuestAction(message.action, sender.url, message.step);
+    const valid = validAuthStep || ["isis", "moses"].includes(service) && message.step === "start";
     if (!valid) return null;
     if (config.username && config.password) return {ok: true, alreadyConfigured: true};
     return loginSetup.open(sender);
@@ -118,9 +128,13 @@ async function handle(message, sender) {
     return {ok: true};
   }
   if (message.type === "failure") {
-    runtime.paused = "TU reported a login error. Check the page and your credentials, then use Resume.";
+    if (!validAuthStep) return null;
+    if (!hasAccount) return loginSetup.open(sender);
+    if (!hasLoginAttempt) return {ok: false, reason: "No automatic credentials were submitted on this tab."};
+    // Stop retries of rejected saved credentials, and offer the account editor immediately.
+    runtime.paused = "TU rejected an automatic login. Correct your saved account or use Resume to try again.";
     await persist(runtime);
-    return {ok: true};
+    return {...await loginSetup.open(sender, "rejected"), paused: true};
   }
   const guestStep = ["guest-password", "guest-terms"].includes(message.type);
   if (!["start", "password", "otp", "guest-password", "guest-terms"].includes(message.type)) return null;
@@ -145,6 +159,7 @@ async function handle(message, sender) {
   const kind = message.type === "guest-password" ? "password" : message.type;
   const reason = reserveAttempt(runtime, {kind, tabId: sender.tab.id, flow});
   if (reason) {
+    if (!hasAccount && message.type === "start") return {ok: false, reason};
     runtime.paused = reason;
     await persist(runtime);
     return {ok: false, reason};

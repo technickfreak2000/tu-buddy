@@ -83,9 +83,24 @@ test("logout pause survives background and browser restarts until Resume", async
   await send({type: "resume"});
   assert.equal((await send({type: "check"}, idp)).active, true);
 });
-test("TU errors pause all services; disabled services never start", async () => {
-  await send({type: "failure"}, idp);
+test("rejected saved credentials pause retries and open the account editor", async () => {
+  await send({type: "password", action: sso}, idp);
+  assert.equal((await send({type: "check"}, idp)).hasLoginAttempt, true);
+  const failed = await send({type: "failure", step: "password", action: sso}, idp);
+  assert.equal(failed.paused, true);
+  assert.equal(failed.opened, true);
   assert.equal((await send({type: "check"}, isis)).active, false);
+  const setup = {url: tabs.get(100).url, tab: {id: 100}};
+  assert.equal((await send({type: "setup-info"}, setup)).reason, "rejected");
+  await send({type: "setup-save", account: {username: "student", password: "corrected-password", totp: ""}}, setup);
+  assert.equal((await send({type: "check"}, idp)).active, true);
+  assert.equal((await send({type: "check"}, idp)).hasLoginAttempt, false);
+  assert.equal((await send({type: "password", action: sso}, idp)).password, "corrected-password");
+});
+test("unrelated errors and disabled services cannot pause credential handling", async () => {
+  assert.equal(await send({type: "failure"}, isis), null);
+  assert.equal((await send({type: "failure", step: "password", action: sso}, idp)).ok, false);
+  assert.equal((await send({type: "check"}, isis)).active, true);
   await send({type: "resume"});
   local.settings.isis = false;
   assert.equal((await send({type: "check"}, isis)).active, false);
@@ -158,6 +173,33 @@ test("missing credentials open setup only for checked TU authentication steps", 
   assert.equal(tabs.size, 2);
   await send({type: "open-setup", step: "password", action: sso}, idp);
   assert.equal(tabs.size, 2);
+});
+test("ISIS and Moses open first-time setup directly without credential submission", async () => {
+  local.settings = {...DEFAULT_SETTINGS};
+  for (const sender of [isis, {url: "https://moseskonto.tu-berlin.de/moses/index.html", tab: {id: 2}, frameId: 0}]) {
+    tabs.set(sender.tab.id, {id: sender.tab.id, url: sender.url});
+    assert.equal((await send({type: "open-setup", step: "start"}, sender)).opened, true);
+    assert.equal((await send({type: "check"}, sender)).active, true);
+  }
+  assert.equal(session.runtime, undefined);
+});
+test("missing accounts with errors offer setup without pausing, including old erroneous pauses", async () => {
+  local.settings = {...DEFAULT_SETTINGS};
+  local.pauseReason = "TU reported a login error. Check the page and your credentials, then use Resume.";
+  assert.equal((await send({type: "check"}, idp)).active, true);
+  assert.equal((await send({type: "failure", step: "password", action: sso}, idp)).opened, true);
+  assert.equal((await send({type: "check"}, idp)).active, true);
+  assert.equal(local.pauseReason, "");
+  assert.equal(local.settings.password, "");
+  local.pauseReason = "Paused from the toolbar.";
+  assert.equal((await send({type: "check"}, idp)).active, false);
+});
+test("SSO-only start loops do not globally disable an account that has not been configured", async () => {
+  local.settings = {...DEFAULT_SETTINGS};
+  await send({type: "start"}, isis);
+  assert.equal((await send({type: "start"}, isis)).ok, false);
+  assert.equal((await send({type: "check"}, idp)).active, true);
+  assert.equal((await send({type: "check"}, idp)).needsSetup, true);
 });
 test("setup saves the TOTP seed locally, preserves preferences and resumes the TU login", async () => {
   const setup = await openSetup();

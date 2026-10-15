@@ -73,8 +73,12 @@ async function load() {
   const info = await browser.runtime.sendMessage({type: "setup-info"});
   if (!info) throw new Error("Could not load the login setup. Open extension settings to configure your account.");
   $("username").value = info.username || "";
+  if (info.reason === "rejected") {
+    document.querySelector("h1").textContent = "Check your TU login details";
+    $("intro").textContent = "TU reported an error after an automatic sign-in attempt. Automatic login is paused. Check your username, password and TOTP setup secret, then save to try again.";
+  }
   if (info.canReturn) {
-    const label = {idp: "TU single sign-on", guest: "TUB-Guest Wi-Fi"}[info.service] || "TU login";
+    const label = {idp: "TU single sign-on", guest: "TUB-Guest Wi-Fi", isis: "ISIS", moses: "Moses"}[info.service] || "TU login";
     $("destination").textContent = `Continue to ${label} after saving`;
     $("destination").hidden = false;
   }

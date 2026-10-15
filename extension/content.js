@@ -1,11 +1,12 @@
 (() => {
   if (window.top !== window) return;
-  const {plan, loginError, isLogout, authenticated} = globalThis.TuLoginAdapters;
+  const {plan, loginErrors, isLogout, authenticated} = globalThis.TuLoginAdapters;
   let working = false, stopped = false, timer, retryTimer, notice, retryAt = 0;
   let attempted = new WeakSet();
   let reportedSuccess = false;
   let setupPending = false;
-  const preparedTerms = new WeakSet();
+  // Ignore an error already present before a retry; a new response can report a new failure.
+  let previousErrors = new Map();
   const send = message => browser.runtime.sendMessage(message);
 
   function show(message) {
@@ -41,8 +42,9 @@
         await send({type: "success"});
       }
       const current = plan(document, location.href);
-      if (!current || attempted.has(current.form || current.button)) return;
-      if (status.needsSetup && ["password", "otp", "guest-password"].includes(current.kind)) {
+      if (!current) return;
+      const authStep = ["password", "otp", "guest-password"].includes(current.kind);
+      if (status.needsSetup && (authStep || current.kind === "start")) {
         const setup = await send({type: "open-setup", step: current.kind, action: current.action});
         if (setup?.opened) { setupPending = true; return; }
         if (!setup?.alreadyConfigured && !setup?.skipped) {
@@ -50,27 +52,22 @@
           return;
         }
       }
+      const errors = authStep ? loginErrors(document) : [];
+      if (status.hasLoginAttempt && errors.some(node => previousErrors.get(node) !== node.textContent)) {
+        const failure = await send({type: "failure", step: current.kind, action: current.action});
+        if (failure?.opened) setupPending = true;
+        stopped = true;
+        show("TU reported a login error. Check your account in the extension's login page before trying again.");
+        return;
+      }
+      if (!errors.length) previousErrors.clear();
+      if (attempted.has(current.form || current.button)) return;
       if (current.kind === "guest-terms" || current.terms) {
         if (!status.acceptGuestTerms) {
           show("Accept the guest network AGB here, or enable automatic acceptance in settings.");
           return;
         }
         if (current.terms && !current.terms.checked) current.terms.click();
-        if (current.needsScroll) {
-          if (!preparedTerms.has(current.form) && current.scrollArea) {
-            preparedTerms.add(current.form);
-            current.scrollArea.scrollTop = current.scrollArea.scrollHeight;
-            current.scrollArea.dispatchEvent(new Event("scroll", {bubbles: true}));
-            setTimeout(schedule, 300);
-          }
-          return;
-        }
-      }
-      if (loginError(document)) {
-        await send({type: "failure"});
-        stopped = true;
-        show("Login stopped after an error. Check the page, then click Resume in the toolbar.");
-        return;
       }
       const result = await send({type: current.kind, action: current.action});
       if (!result?.ok) {
@@ -91,6 +88,14 @@
         fill(current.username, result.username);
         fill(current.password, result.password);
       } else if (current.kind === "otp") fill(current.otp, result.code);
+      if (authStep) previousErrors = new Map(errors.map(node => [node, node.textContent]));
+      if (current.kind === "guest-terms") {
+        // Cisco's Accept handler sets this field then submits aupForm. Do the same
+        // without depending on the scroll gate, delayed handlers or a disabled button.
+        fill(current.acceptance, "true");
+        HTMLFormElement.prototype.requestSubmit.call(current.form);
+        return;
+      }
       // A real click preserves Shibboleth's named submitter and Moses's Vue handler.
       current.button.click();
     } catch {
@@ -113,7 +118,14 @@
   }, true);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) schedule(); });
   browser.runtime.onMessage.addListener(message => {
-    if (message?.type === "login-setup-finished") { setupPending = false; schedule(); }
+    if (message?.type === "login-setup-finished") {
+      setupPending = false;
+      stopped = false;
+      attempted = new WeakSet();
+      retryAt = 0;
+      notice?.remove(); notice = null;
+      schedule();
+    }
   });
   document.addEventListener("input", event => {
     // Let a person take over a login form without overwriting what they type.
@@ -134,6 +146,6 @@
     }
   });
   new MutationObserver(schedule).observe(document.documentElement, {subtree: true, childList: true,
-    attributes: true, attributeFilter: ["class", "hidden", "disabled", "action"]});
+    characterData: true, attributes: true, attributeFilter: ["class", "hidden", "disabled", "action"]});
   schedule();
 })();

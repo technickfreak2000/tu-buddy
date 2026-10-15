@@ -109,3 +109,26 @@ test("guest AGB adapter selects Accept and supports scroll-gated controls", asyn
   p.doc.forms[0].action = "ChangePasswordSubmit.action";
   assert.equal(p.plan(), null);
 });
+test("post-login AGB can omit the portal ID but must contain the exact acceptance field", async () => {
+  const p = await page("guest-terms.html", guest);
+  p.doc.querySelector('[name="portal"]').remove();
+  assert.equal(p.plan().kind, "guest-terms");
+  p.doc.querySelector('#aupAccepted').remove();
+  assert.equal(p.plan(), null);
+});
+test("AGB rejects foreign portals, external submit overrides and missing AUP structure", async () => {
+  for (const mutate of [
+    doc => doc.querySelector('[name="portal"]').value = "foreign-portal",
+    doc => doc.querySelector('#ui_aup_accept_button').setAttribute("formaction", "https://attacker.test/"),
+    doc => {
+      doc.forms[0].action = "https://attacker.test/";
+      doc.querySelector('#ui_aup_accept_button').setAttribute("formaction", "AupSubmit.action");
+    },
+    doc => { const base = doc.createElement("base"); base.href = "https://attacker.test/"; doc.head.append(base); },
+    doc => doc.querySelector('#page-aup').removeAttribute("id"),
+    doc => doc.forms[0].target = "_blank"
+  ]) {
+    const p = await page("guest-terms.html", guest);
+    mutate(p.doc); assert.equal(p.plan(), null);
+  }
+});

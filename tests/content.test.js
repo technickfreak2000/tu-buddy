@@ -10,7 +10,7 @@ const fixture = await readFile(new URL("fixtures/password.html", import.meta.url
 const idp = "https://shibboleth.tubit.tu-berlin.de/idp/profile/SAML2/Redirect/SSO?execution=e1s2";
 
 function setup(html = fixture, responder = () => ({ok: true, username: "student", password: "test-only-password"}),
-  {url = idp, acceptGuestTerms = true, needsSetup = false} = {}) {
+  {url = idp, acceptGuestTerms = true, needsSetup = false, hasLoginAttempt = false} = {}) {
   const dom = new JSDOM(html, {url, runScripts: "outside-only", pretendToBeVisual: true});
   const messages = [], submits = [];
   let onChange, onMessage;
@@ -19,6 +19,7 @@ function setup(html = fixture, responder = () => ({ok: true, username: "student"
     runtime: {onMessage: {addListener: fn => { onMessage = fn; }}, sendMessage: async message => {
       messages.push(message);
       return message.type === "check" ? {active: true, acceptGuestTerms,
+        hasLoginAttempt: typeof hasLoginAttempt === "function" ? hasLoginAttempt() : hasLoginAttempt,
         needsSetup: typeof needsSetup === "function" ? needsSetup() : needsSetup} : responder(message);
     }},
     storage: {onChanged: {addListener: fn => { onChange = fn; }}}
@@ -51,12 +52,14 @@ test("fills and submits using the named Shibboleth submitter, once per form", as
     await until(() => p.submits.length === 2);
   } finally { p.dom.window.close(); }
 });
-test("error pages pause and do not submit credentials", async () => {
-  const p = setup(fixture.replace("<form ", '<p class="form-error">Incorrect password</p><form '));
+test("errors after an automatic attempt open correction before submitting again", async () => {
+  const p = setup(fixture.replace("<form ", '<p class="form-error">Incorrect password</p><form '),
+    () => ({ok: true, opened: true, paused: true}), {hasLoginAttempt: true});
   try {
     await until(() => p.messages.some(m => m.type === "failure"));
     assert.equal(p.submits.length, 0);
     assert.equal(p.messages.some(m => m.type === "password"), false);
+    assert.equal(p.messages.find(m => m.type === "failure").step, "password");
   } finally { p.dom.window.close(); }
 });
 test("rejects a form whose action changes while credentials are being requested", async () => {
@@ -96,7 +99,7 @@ test("guest login fills the verified fields and preserves the portal's CSRF toke
     assert.equal(p.messages.some(m => m.type === "guest-password"), true);
   } finally { p.dom.window.close(); }
 });
-test("guest terms follow Cisco's Accept handler and never choose Decline", async () => {
+test("guest terms set Cisco's acceptance field and never choose Decline", async () => {
   const html = await readFile(new URL("fixtures/guest-terms.html", import.meta.url), "utf8");
   const p = setup(html, () => ({ok: true}), {url: guestUrl});
   let declined = false;
@@ -120,16 +123,77 @@ test("guest terms stay manual when automatic acceptance is disabled", async () =
     assert.equal(p.submits.length, 0);
   } finally { p.dom.window.close(); }
 });
-test("guest AGB scrolling uses the portal's unlock handler before reserving acceptance", async () => {
+test("guest AGB accepts with the scroll gate still locked and no page handlers", async () => {
   const html = await readFile(new URL("fixtures/guest-terms.html", import.meta.url), "utf8");
   const p = setup(html, () => ({ok: true}), {url: guestUrl});
   const button = p.doc.querySelector('#ui_aup_accept_button');
   button.disabled = true;
-  p.doc.querySelector('.cisco-ise-aup-text').addEventListener("scroll", () => { button.disabled = false; });
-  button.addEventListener("click", () => p.doc.forms[0].requestSubmit());
   try {
     await until(() => p.submits.length === 1);
+    assert.equal(button.disabled, true);
+    assert.equal(p.submits[0].fields.aupAccepted, "true");
     assert.equal(p.messages.filter(m => m.type === "guest-terms").length, 1);
+  } finally { p.dom.window.close(); }
+});
+test("missing credentials open setup even on an existing login error", async () => {
+  const p = setup(fixture.replace("<form ", '<p class="form-error">Incorrect password</p><form '),
+    () => ({ok: true, opened: true}), {needsSetup: true});
+  try {
+    await until(() => p.messages.some(m => m.type === "open-setup"));
+    assert.equal(p.messages.some(m => m.type === "failure"), false);
+    assert.equal(p.submits.length, 0);
+  } finally { p.dom.window.close(); }
+});
+test("ISIS and Moses login controls offer account setup before starting SSO", async () => {
+  for (const [url, html] of [
+    ["https://isis.tu-berlin.de/login/index.php", await readFile(new URL("fixtures/isis.html", import.meta.url), "utf8")],
+    ["https://moseskonto.tu-berlin.de/moses/index.html", '<a class="nav-top-user-login" href="#">Login</a>']
+  ]) {
+    const p = setup(html, () => ({ok: true, opened: true}), {url, needsSetup: true});
+    try {
+      await until(() => p.messages.some(m => m.type === "open-setup"));
+      assert.equal(p.messages.find(m => m.type === "open-setup").step, "start");
+      assert.equal(p.messages.some(m => m.type === "start"), false);
+    } finally { p.dom.window.close(); }
+  }
+});
+test("stale errors allow a fresh attempt; a new error response stops even on the same form", async () => {
+  let submitted = false;
+  const p = setup(fixture.replace("<form ", '<p class="form-error">Incorrect password</p><form '),
+    message => {
+      if (message.type === "password") { submitted = true; return {ok: true, username: "student", password: "corrected"}; }
+      return {ok: true, opened: true, paused: true};
+    }, {hasLoginAttempt: () => submitted});
+  try {
+    await until(() => p.submits.length === 1);
+    p.doc.body.append(p.doc.createElement("div"));
+    await delay(350);
+    assert.equal(p.messages.some(m => m.type === "failure"), false);
+    const replacement = p.doc.createElement("p");
+    replacement.className = "form-error";
+    replacement.textContent = "Incorrect password";
+    p.doc.querySelector(".form-error").replaceWith(replacement);
+    await until(() => p.messages.some(m => m.type === "failure"));
+    assert.equal(p.submits.length, 1);
+  } finally { p.dom.window.close(); }
+});
+test("saving after rejection retries the retained form without relying on a settings-change event", async () => {
+  let hasLoginAttempt = false;
+  const p = setup(fixture, message => {
+    if (message.type === "password") { hasLoginAttempt = true; return {ok: true, username: "student", password: "corrected"}; }
+    return {ok: true, opened: true, paused: true};
+  }, {hasLoginAttempt: () => hasLoginAttempt});
+  try {
+    await until(() => p.submits.length === 1);
+    const error = p.doc.createElement("p");
+    error.className = "form-error"; error.textContent = "Incorrect password";
+    p.doc.body.append(error);
+    await until(() => p.messages.some(m => m.type === "failure"));
+    hasLoginAttempt = false; // setup-save clears attempts before waking the original tab.
+    p.setupFinished();
+    await until(() => p.submits.length === 2);
+    await delay(350);
+    assert.equal(p.messages.filter(m => m.type === "failure").length, 1);
   } finally { p.dom.window.close(); }
 });
 test("first-time TU login opens setup before requesting or submitting any credentials", async () => {

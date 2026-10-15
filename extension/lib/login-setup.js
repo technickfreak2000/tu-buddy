@@ -46,7 +46,7 @@ export function createLoginSetup(api) {
     try { await api.tabs.sendMessage(tabId, {type: "login-setup-finished"}); }
     catch { /* The login document may have navigated or closed. */ }
   }
-  async function open(sender) {
+  async function open(sender, reason = "missing") {
     if (await bypassed(sender.tab.id)) return {ok: false, skipped: true};
     const pending = await requests();
     const existing = pending.find(item => item.sourceTabId === sender.tab.id);
@@ -61,7 +61,7 @@ export function createLoginSetup(api) {
     }
     const source = new URL(sender.url);
     const item = {id: crypto.randomUUID(), sourceTabId: sender.tab.id, service: classifyUrl(sender.url),
-      origin: source.origin, path: source.pathname, created: Date.now()};
+      origin: source.origin, path: source.pathname, created: Date.now(), reason};
     // The page URL carries only a random request ID. SAML, portal tokens and secrets stay out of it.
     const properties = {url: base + "?request=" + item.id, active: true};
     if (Number.isInteger(sender.tab.windowId)) properties.windowId = sender.tab.windowId;
@@ -72,7 +72,7 @@ export function createLoginSetup(api) {
   }
   async function info(sender) {
     const request = await requestFor(sender);
-    return {service: request?.service || "", canReturn: Boolean(await sourceTab(request))};
+    return {service: request?.service || "", reason: request?.reason || "", canReturn: Boolean(await sourceTab(request))};
   }
   async function finish(sender, skip = false) {
     const request = await requestFor(sender);

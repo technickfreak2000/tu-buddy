@@ -7,7 +7,7 @@
     getComputedStyle(element).visibility !== "hidden" && getComputedStyle(element).display !== "none");
   const firstVisible = (root, selector) => [...root.querySelectorAll(selector)].find(isVisible);
   const idpUrl = url => url.origin === IDP && /^\/idp\/profile\/(?:SAML2|Shibboleth|cas|oidc)\//i.test(url.pathname);
-  const actionFor = (form, button, href) => new URL(button.getAttribute("formaction") || form.getAttribute("action") || href, href);
+  const actionFor = (form, button, href) => new URL(button.getAttribute("formaction") || form.getAttribute("action") || href, form.baseURI || href);
 
   function authenticated(doc, href) {
     const url = new URL(href);
@@ -22,7 +22,8 @@
     if (url.origin === GUEST && url.pathname.startsWith("/portal/")) {
       if (authenticated(doc, href)) return null;
       for (const form of doc.forms) {
-        if (form.querySelector('input[name="portal"]')?.value !== PORTAL) continue;
+        const portal = form.querySelector('input[name="portal"]');
+        if (portal && portal.value !== PORTAL) continue;
         const login = firstVisible(form, '#ui_login_signon_button');
         // The AUP button can start disabled until its scroll/checkbox requirement is met.
         const accept = form.querySelector('#ui_aup_accept_button');
@@ -33,14 +34,16 @@
             (button.getAttribute("formmethod") || form.method).toLowerCase() !== "post" ||
             (button.getAttribute("formtarget") || form.target || "_self") !== "_self") continue;
         const terms = form.querySelector('input[type="checkbox"][id="aupAccepted"]');
-        if (login && form.id === "portalloginForm" && action.pathname === "/portal/LoginSubmit.action") {
+        if (login && portal?.value === PORTAL && form.id === "portalloginForm" && action.pathname === "/portal/LoginSubmit.action") {
           const username = firstVisible(form, 'input[name="user.username"]');
           const password = firstVisible(form, 'input[name="user.password"][type="password"]');
           if (username && password) return {kind: "guest-password", form, button, username, password, terms, action: action.href};
         }
-        if (accept && form.name === "aupForm" &&
+        const acceptance = form.querySelector('input[type="hidden"][id="aupAccepted"][name="aupAccepted"]');
+        if (accept && acceptance?.form === form && doc.querySelector('#page-aup')?.contains(form) && form.name === "aupForm" &&
+            form.action === action.href && form.method.toLowerCase() === "post" && (form.target || "_self") === "_self" &&
             ["/portal/AupSubmit.action", "/portal/AupAccept.action", "/portal/Aup.action"].includes(action.pathname)) {
-          return {kind: "guest-terms", form, button, terms, scrollArea: doc.querySelector('.cisco-ise-aup-text'),
+          return {kind: "guest-terms", form, button, terms, acceptance, scrollArea: doc.querySelector('.cisco-ise-aup-text'),
             needsScroll: button.disabled || Boolean(button.closest('.ui-disabled')), action: action.href};
         }
       }
@@ -90,11 +93,12 @@
     return null;
   }
 
-  function loginError(doc) {
+  function loginErrors(doc) {
     const candidates = doc.querySelectorAll('.form-error, .login-error, #login-error, .alert-danger, [role="alert"], .error, .cisco-ise-error-message, .cisco-ise-error, #ui_login_error_message');
-    return [...candidates].some(el => isVisible(el) &&
+    return [...candidates].filter(el => isVisible(el) &&
       /invalid|incorrect|failed|failure|ungültig|falsch|fehlgeschlagen|gesperrt|locked|abgelaufen|expired|nicht korrekt/i.test(el.textContent));
   }
+  const loginError = doc => loginErrors(doc).length > 0;
   function isLogout(element, href) {
     const control = element?.closest?.('a, button, input[type="submit"]');
     if (!control) return false;
@@ -109,5 +113,5 @@
     return control.matches('.nav-top-user-logout, [name="_eventId_logout"]') ||
       /^(?:logout|log out|sign out|abmelden)$/i.test((control.textContent || control.value || "").trim());
   }
-  globalThis.TuLoginAdapters = Object.freeze({plan, loginError, isLogout, authenticated});
+  globalThis.TuLoginAdapters = Object.freeze({plan, loginError, loginErrors, isLogout, authenticated});
 })();
