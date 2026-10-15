@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "TU Berlin Auto Login",
-  "version": "1.3.2",
-  "description": "Automatic TU Berlin login for ISIS, Moses, TUport and TUB-Guest Wi-Fi, with local password and TOTP autofill.",
+  "version": "1.4.0",
+  "description": "TU Berlin login for ISIS, Moses, TUport and TUB-Guest with local TOTP, plus download buttons for ISIS lecture videos.",
   "permissions": ["storage", "captivePortal", "alarms", "nativeMessaging", "webNavigation"],
   "host_permissions": [
     "https://isis.tu-berlin.de/*",
@@ -21,6 +21,10 @@
       "https://radius-01.tu-berlin.de/portal/*"
     ],
     "js": ["adapters.js", "content.js"],
+    "run_at": "document_idle"
+  }, {
+    "matches": ["https://isis.tu-berlin.de/mod/videoservice/*"],
+    "js": ["video-download.js"],
     "run_at": "document_idle"
   }],
   "options_ui": {"page": "options/options.html", "open_in_tab": true},
