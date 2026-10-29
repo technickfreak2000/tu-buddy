@@ -1,13 +1,14 @@
 {
   "name": "tu-berlin-auto-login",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "node --test --test-isolation=none && python3 -m unittest discover -s tests -p '*_test.py'",
     "lint": "web-ext lint --source-dir extension --warnings-as-errors",
     "build": "node scripts/build.mjs",
-    "start": "web-ext run --source-dir extension --firefox /usr/bin/firefox"
+    "start": "web-ext run --source-dir extension --firefox /usr/bin/firefox",
+    "sign:firefox": "node scripts/sign-firefox.mjs"
   },
   "overrides": {
     "shell-quote": "^1.12.0"

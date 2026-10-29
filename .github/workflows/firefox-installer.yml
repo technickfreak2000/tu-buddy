@@ -1,0 +1,53 @@
+name: Firefox installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      sign:
+        description: "Sign with Mozilla (requires AMO_JWT_ISSUER and AMO_JWT_SECRET repository secrets)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firefox-installer-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  installer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: npm ci
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build
+      - name: Save unsigned Mozilla submission package
+        uses: actions/upload-artifact@v4
+        with:
+          name: firefox-unsigned-submission
+          path: dist/*.zip
+          if-no-files-found: error
+      - name: Sign with Mozilla
+        if: inputs.sign
+        run: npm run sign:firefox
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+      - name: Save signed permanent installer
+        if: inputs.sign
+        uses: actions/upload-artifact@v4
+        with:
+          name: firefox-signed-installer
+          path: dist/*.xpi
+          if-no-files-found: error

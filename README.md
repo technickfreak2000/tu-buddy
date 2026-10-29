@@ -4,7 +4,11 @@ Automatically signs in through the normal TU login flows for **ISIS**, **Moses**
 
 TU controls session expiration. This extension **signs you back in while browsing** rather than making sessions permanent. It does not keep website sessions alive, rewrite cookies or change server security settings. Background tabs wait until you open them. No account is required to build the extension.
 
-## Try it in Firefox
+## Install permanently on your computers
+
+Follow [INSTALL.md](INSTALL.md) to create a Mozilla developer account, obtain a signed XPI and install it on Windows, macOS or Linux. The same signed file works on all your computers and stays installed across restarts. The guide includes manual submission and an optional GitHub signing workflow; each Firefox profile keeps its own TU credentials. Mozilla signing is required before a permanent installer is available.
+
+## Try it temporarily in Firefox
 
 Requires desktop **Firefox 142 or newer**.
 
@@ -88,9 +92,9 @@ npm run build
 npm start
 ```
 
-`npm start` launches an isolated temporary Firefox profile; change the Firefox binary argument in `package.json` if it is installed elsewhere. The build writes `dist/tu-berlin-auto-login-1.4.1.zip` and includes only `extension/`. Install the optional native helper separately from the repository. Runtime JavaScript has no dependencies, no bundler and no network-loaded libraries.
+`npm start` launches an isolated temporary Firefox profile; change the Firefox binary argument in `package.json` if it is installed elsewhere. The build writes `dist/tu-berlin-auto-login-1.4.2.zip` and includes only `extension/`. Install the optional native helper separately from the repository. Runtime JavaScript has no dependencies, no bundler and no network-loaded libraries.
 
-Tests cover RFC 6238 TOTP vectors, URI validation, exact-origin and message authorization, retry limits, pause persistence, login-button selection, named submitters, dynamic Moses navigation, OTP waits, destination changes, guest credential/AGB handling, portal discovery, native message framing, changing adapter names and helper installation/removal. Native tests use Python's standard library.
+Tests cover RFC 6238 TOTP vectors, URI validation, exact-origin and message authorization, retry limits, pause persistence, login-button selection, named submitters, dynamic Moses navigation, OTP waits, destination changes, guest credential/AGB handling, portal discovery, native message framing, changing adapter names and helper installation/removal. Offline installer tests check credential failures, package-only staging, unchanged returned archive bytes and failed/pending signing. They use a fake signer; they do not obtain or validate a Mozilla signature. Native tests use Python's standard library.
 
 ## TUport
 
